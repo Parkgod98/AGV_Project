@@ -1,0 +1,23 @@
+@import './base.css';
+
+/* App layout must be full width (no centering, no grid split) */
+#app {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* Prevent any template centering rules */
+body {
+  display: block;
+}
+
+/* Optional: links inherit dashboard style (avoid template green highlight) */
+a {
+  color: inherit;
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: none;
+}
