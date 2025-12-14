@@ -250,11 +250,12 @@ function closeDetail() {
 <style scoped>
 /* 페이지 자체는 화면 높이를 넘지 않게 */
 .tasks{
-  height: calc(100vh - 88px);
+  height: 100%;       /* ✅ page-inner가 준 높이를 그대로 받는다 */
+  min-height: 0;      /* ✅ 내부 overflow 동작 필수 */
   overflow: hidden;
 
   display: grid;
-  grid-template-rows: auto auto 1fr; /* head / filters / body */
+  grid-template-rows: auto auto 1fr;
   gap: 14px;
 }
 
@@ -316,6 +317,7 @@ h2{ margin:0; font-size: 22px; letter-spacing:-0.2px; }
 
 /* body가 화면 안에서만 레이아웃 잡게 */
 .body{
+  height: 100%;    /* ✅ grid의 1fr이 실제 높이를 갖도록 */
   display: grid;
   grid-template-columns: 1.6fr 1fr;
   gap: 14px;
@@ -339,10 +341,11 @@ h2{ margin:0; font-size: 22px; letter-spacing:-0.2px; }
 
 /* 오른쪽 디테일 카드 내부에서만 스크롤 가능하게 */
 .detailCard{
+  height: 100%;
+  min-height: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  min-height: 0; /* 중요 */
 }
 
 .cardHead{
@@ -402,6 +405,7 @@ h2{ margin:0; font-size: 22px; letter-spacing:-0.2px; }
 /* detail 내용이 남는 공간을 먹고, 그 안에서 스크롤 */
 .detail{
   flex: 1;
+  min-height: 0;     /* ✅ 이게 핵심 */
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -433,8 +437,9 @@ h2{ margin:0; font-size: 22px; letter-spacing:-0.2px; }
 /* Related Events 리스트만 스크롤 */
 .evList{
   flex: 1;
+  min-height: 0;     /* ✅ 이것도 핵심 */
   overflow: auto;
-  padding-right: 6px; /* 스크롤바 공간 살짝 */
+  padding-right: 6px;
 }
 .ev{
   padding: 10px 10px;

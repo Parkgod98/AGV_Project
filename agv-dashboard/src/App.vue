@@ -30,7 +30,9 @@ const route = useRoute();
     </header>
 
     <main class="page">
-      <RouterView />
+      <div class="page-inner">
+        <RouterView />
+      </div>
     </main>
 
     <footer class="footer">
@@ -84,8 +86,8 @@ a {
 
 /* ---------- App shell ---------- */
 .app {
-  min-height: 100vh;
-  position: relative;
+  height: 100vh;     /* ✅ min-height 말고 height로 고정 */
+  min-height: 0;     /* ✅ flex 자식 스크롤 필수 */
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -216,13 +218,23 @@ a {
 /* ---------- Page ---------- */
 .page {
   flex: 1;
-  min-height: 0;       /* 핵심: 내부 스크롤 살리는 옵션 */
-  overflow: hidden;    /* 핵심: body로 스크롤 안 튀게 */
+  min-height: 0;
+  overflow: hidden;
 
   position: relative;
   z-index: 1;
 
-  padding: 22px 28px 22px;  /* ✅ bottom 40px → 22px로 줄여 */
+  /* padding은 page-inner로 옮김 */
+  padding: 0;
+  
+}
+
+.page-inner{
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+
+  padding: 22px 28px 22px;
 }
 
 /* ---------- Footer ---------- */
