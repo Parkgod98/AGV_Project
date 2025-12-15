@@ -15,26 +15,41 @@ const errorOnly = ref(false);
 const groupOpen = ref(new Set());
 const itemOpen = ref(new Set());
 
+// Copy feedback
+const copiedKey = ref(null);
+let copiedTimer = null;
+
+
 function tsToText(ts) {
   if (!ts) return "—";
   return new Date(ts).toLocaleString();
 }
 
-function copyJSON(obj) {
+async function copyJSON(obj, key) {
   const text = JSON.stringify(obj, null, 2);
-  // clipboard fallback까지 포함
-  if (navigator.clipboard?.writeText) {
-    navigator.clipboard.writeText(text);
-  } else {
-    const ta = document.createElement("textarea");
-    ta.value = text;
-    ta.style.position = "fixed";
-    ta.style.left = "-9999px";
-    document.body.appendChild(ta);
-    ta.focus();
-    ta.select();
-    document.execCommand("copy");
-    document.body.removeChild(ta);
+
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.left = "-9999px";
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+    }
+
+    copiedKey.value = key;
+    if (copiedTimer) clearTimeout(copiedTimer);
+    copiedTimer = setTimeout(() => {
+      copiedKey.value = null;
+    }, 1200);
+  } catch (e) {
+    console.error("Copy failed", e);
   }
 }
 
@@ -97,7 +112,10 @@ onMounted(async () => {
   await refresh();
   timer = setInterval(refresh, 2000);
 });
-onBeforeUnmount(() => timer && clearInterval(timer));
+onBeforeUnmount(() => {
+  timer && clearInterval(timer);
+  copiedTimer && clearTimeout(copiedTimer);
+});
 </script>
 
 <template>
@@ -162,7 +180,15 @@ onBeforeUnmount(() => timer && clearInterval(timer));
 
                 <div class="right" @click.stop>
                   <span v-if="e.error_code" class="errTagOne">ERR {{ e.error_code }}</span>
-                  <button class="btn" @click="copyJSON(e)">Copy</button>
+                  <button
+                    class="btn"
+                    @click.stop="copyJSON(e, `${g.taskId}:${idx}`)"
+                  >
+                    <span v-if="copiedKey === `${g.taskId}:${idx}`" class="copied">
+                      Copied!
+                    </span>
+                    <span v-else>Copy</span>
+                  </button>
                   <span class="chev mini">{{ itemOpen.has(`${g.taskId}:${idx}`) ? "▾" : "▸" }}</span>
                 </div>
               </div>
@@ -450,6 +476,12 @@ h2 {
   font-size: 12px;
 }
 
+.copied {
+  color: rgba(0, 220, 180, 0.95);
+  font-weight: 900;
+  letter-spacing: 0.2px;
+}
+
 @media (max-width: 1100px) {
   .head {
     flex-direction: column;
@@ -466,4 +498,6 @@ h2 {
     max-width: 260px;
   }
 }
+
+
 </style>
