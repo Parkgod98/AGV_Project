@@ -43,16 +43,21 @@ async function refreshSlow() {
 let fastTimer = null;
 let slowTimer = null;
 
-onMounted(async () => {
+async function refreshAll() {
   await refreshSlow();
   await refreshFast();
-  fastTimer = setInterval(refreshFast, 2000);
-  slowTimer = setInterval(refreshSlow, 10000);
+}
+onMounted(async () => {
+  await refreshAll(); // 처음 1회만
+  // await refreshSlow();
+  // await refreshFast();
+  // fastTimer = setInterval(refreshFast, 2000);
+  // slowTimer = setInterval(refreshSlow, 10000);
 });
 
 onBeforeUnmount(() => {
-  if (fastTimer) clearInterval(fastTimer);
-  if (slowTimer) clearInterval(slowTimer);
+  // if (fastTimer) clearInterval(fastTimer);
+  // if (slowTimer) clearInterval(slowTimer);
 });
 </script>
 

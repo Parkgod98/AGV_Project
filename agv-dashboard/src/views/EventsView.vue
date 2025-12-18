@@ -2,6 +2,13 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { getEvents } from "@/api/agv";
 
+const lastUpdatedAt = ref(null);
+
+const lastUpdatedText = computed(() => {
+  if (!lastUpdatedAt.value) return "—";
+  return new Date(lastUpdatedAt.value).toLocaleTimeString();
+});
+
 const events = ref([]);
 const qTask = ref("");
 const qType = ref("");
@@ -105,15 +112,16 @@ function toggleItem(key) {
 
 async function refresh() {
   events.value = (await getEvents({ limit: 500 })) || [];
+  lastUpdatedAt.value = Date.now();
 }
 
 let timer = null;
 onMounted(async () => {
   await refresh();
-  timer = setInterval(refresh, 2000);
+  // timer = setInterval(refresh, 2000);
 });
 onBeforeUnmount(() => {
-  timer && clearInterval(timer);
+  // timer && clearInterval(timer);
   copiedTimer && clearTimeout(copiedTimer);
 });
 </script>
@@ -133,6 +141,11 @@ onBeforeUnmount(() => {
           <input type="checkbox" v-model="errorOnly" />
           errors only
         </label>
+
+        <div class="rightTools">
+          <button class="refreshBtn" @click="refresh">↻ Refresh</button>
+          <div class="updated">Updated: {{ lastUpdatedText }}</div>
+        </div>
       </div>
     </div>
 
@@ -480,6 +493,30 @@ h2 {
   color: rgba(0, 220, 180, 0.95);
   font-weight: 900;
   letter-spacing: 0.2px;
+}
+
+.rightTools{
+  margin-left:auto;           /* ✅ 오른쪽 끝으로 밀기 */
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+
+.refreshBtn{
+  border:1px solid rgba(255,255,255,0.15);
+  background: rgba(0,0,0,0.25);
+  color:#fff;
+  padding:8px 12px;
+  border-radius:12px;
+  cursor:pointer;
+  font-size:12px;
+}
+.refreshBtn:hover{ background: rgba(255,255,255,0.06); }
+
+.updated{
+  font-size:12px;
+  opacity:0.65;
+  white-space:nowrap;
 }
 
 @media (max-width: 1100px) {

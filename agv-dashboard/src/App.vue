@@ -1,11 +1,17 @@
 <script setup>
 import { RouterLink, RouterView, useRoute } from "vue-router";
+import { computed } from "vue";
 
 const route = useRoute();
+const isUser = computed(() => route.path.startsWith("/user"));
 </script>
 
 <template>
-  <div class="app">
+  <!-- ✅ /user 경로면: 운영자 쉘(탑바/푸터/배경) 자체를 안 그림 -->
+  <RouterView v-if="isUser" />
+
+  <!-- ✅ 그 외(운영자 대시보드): 기존 쉘 그대로 -->
+  <div v-else class="app">
     <!-- subtle background ornaments -->
     <div class="bg-orb orb-a" />
     <div class="bg-orb orb-b" />

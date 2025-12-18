@@ -4,6 +4,9 @@ import RobotsView from "../views/RobotsView.vue";
 import TasksView from "../views/TasksView.vue";
 import EventsView from "../views/EventsView.vue";
 
+import UserApp from "../views/user/UserApp.vue";
+
+
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
@@ -26,6 +29,12 @@ const router = createRouter({
       path: "/events",
       name: "events",
       component: EventsView,
+    },
+
+    { 
+      path: "/user", 
+      name: "user", 
+      component: UserApp
     },
   ],
 });

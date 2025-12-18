@@ -33,11 +33,11 @@ function formatTime(ts) {
 onMounted(() => {
   load();
   // 자동 새로고침 (원하면 주기 조절)
-  timerId = setInterval(load, 2000);
+  // timerId = setInterval(load, 2000);
 });
 
 onBeforeUnmount(() => {
-  if (timerId) clearInterval(timerId);
+  // if (timerId) clearInterval(timerId);
 });
 </script>
 

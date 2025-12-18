@@ -2,6 +2,13 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { getTasks, getEvents } from "@/api/agv";
 
+const lastUpdatedAt = ref(null);
+
+const lastUpdatedText = computed(() => {
+  if (!lastUpdatedAt.value) return "—";
+  return new Date(lastUpdatedAt.value).toLocaleTimeString();
+});
+
 const tasks = ref([]);
 const events = ref([]);
 
@@ -84,14 +91,15 @@ async function refresh() {
     if (!still) selected.value = null;
     else selected.value = still; // 최신 값으로 갱신
   }
+  lastUpdatedAt.value = Date.now();
 }
 
 let timer = null;
 onMounted(async () => {
   await refresh();
-  timer = setInterval(refresh, 2000);
+  // timer = setInterval(refresh, 2000);
 });
-onBeforeUnmount(() => timer && clearInterval(timer));
+// onBeforeUnmount(() => timer && clearInterval(timer));
 
 function selectTask(t) {
   selected.value = t;
@@ -155,6 +163,11 @@ function closeDetail() {
         <option value="USER1">USER1</option>
         <option value="USER2">USER2</option>
       </select>
+
+      <div class="rightTools">
+        <button class="refreshBtn" @click="refresh">↻ Refresh</button>
+        <div class="updated">Updated: {{ lastUpdatedText }}</div>
+      </div>
     </div>
 
     <!-- Body: Table + Detail -->
@@ -248,6 +261,18 @@ function closeDetail() {
 </template>
 
 <style scoped>
+  .refreshBtn{
+  border:1px solid rgba(255,255,255,0.15);
+  background: rgba(0,0,0,0.25);
+  color:#fff;
+  padding:8px 12px;
+  border-radius:12px;
+  cursor:pointer;
+  font-size:12px;
+}
+.refreshBtn:hover{
+  background: rgba(255,255,255,0.06);
+}
 /* 페이지 자체는 화면 높이를 넘지 않게 */
 .tasks{
   height: 100%;       /* ✅ page-inner가 준 높이를 그대로 받는다 */
@@ -469,6 +494,30 @@ h2{ margin:0; font-size: 22px; letter-spacing:-0.2px; }
 .pill[data-s="pending"]{ color: rgba(255,200,80,0.95); }
 
 .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+
+.rightTools{
+  margin-left:auto;           /* ✅ 오른쪽 끝으로 밀기 */
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+
+.refreshBtn{
+  border:1px solid rgba(255,255,255,0.15);
+  background: rgba(0,0,0,0.25);
+  color:#fff;
+  padding:8px 12px;
+  border-radius:12px;
+  cursor:pointer;
+  font-size:12px;
+}
+.refreshBtn:hover{ background: rgba(255,255,255,0.06); }
+
+.updated{
+  font-size:12px;
+  opacity:0.65;
+  white-space:nowrap;
+}
 
 @media (max-width: 1100px){
   .head{ flex-direction: column; align-items: flex-start; }
