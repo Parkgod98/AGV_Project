@@ -1,7 +1,8 @@
 import axios from "axios";
 
 // 일단 하드코딩, 나중에 .env로 빼도 됨
-const BASE_URL = "http://localhost:1880/api";
+// const BASE_URL = "http://localhost:1880/api";
+const BASE_URL = "/api";
 
 export async function getRobots({ limit } = {}) {
   const params = {};
