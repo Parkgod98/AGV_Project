@@ -14,9 +14,9 @@
     </header>
 
     <!-- Content -->
-    <main class="ua-main">
+    <main class="ua-main" :key="tab">
       <!-- HOME -->
-      <section v-show="tab==='home'" class="page">
+      <section v-if="tab==='home'" class="page">
         <div class="grid">
           <div class="card">
             <div class="card-title">로봇 상태</div>
@@ -82,6 +82,13 @@
               <div class="kv"><span>이번 주 누적</span><b>{{ week.water_ml }}ml</b></div>
             </div>
             <div class="muted">* 추정 = 물 배달 횟수 × {{ waterCupMl }}ml</div>
+
+            <div v-if="settings.water_goal_ml > 0" class="muted">
+              목표 {{ settings.water_goal_ml }}ml · 달성 {{ waterGoalPct }}%
+            </div>
+            <div v-if="settings.water_goal_ml > 0" class="progress mt2">
+              <div class="bar" :style="{ width: waterGoalPct + '%' }"></div>
+            </div>
           </div>
 
           <div class="card wide">
@@ -117,18 +124,43 @@
             </div>
           </div>
 
+          <!-- ✅ Home 맨 아래 루틴 카드: Settings에서 만든 루틴 표시 -->
           <div class="card wide">
             <div class="card-title">루틴(예약)</div>
+
+            <div class="actions" style="margin-top:0">
+              <button class="btn sm" @click="tab='settings'">Settings 열기</button>
+            </div>
+
+            <div v-if="routinesPreview.length === 0" class="muted">
+              아직 등록된 루틴이 없습니다. <b>Settings</b> 탭에서 추가해보세요.
+            </div>
+
+            <div v-else class="list">
+              <div v-for="r in routinesPreview" :key="r.id" class="item">
+                <div class="item-top">
+                  <b>{{ r.time }}</b>
+                  <span class="pill">{{ routineRepeatText(r) }}</span>
+                </div>
+                <div class="item-sub muted">
+                  {{ labelType(r.action_type) }} → {{ uiPlace(routineTargetArea(r)) }}
+                </div>
+              </div>
+            </div>
+
+            <div v-if="settings.routines.length > routinesPreview.length" class="muted">
+              + {{ settings.routines.length - routinesPreview.length }}개 더 있음 (Settings에서 확인)
+            </div>
+
             <div class="muted">
-              매일/매주 반복 작업(예: 매일 10시 물 배달, 19시 환경 정리)을 곧 추가할 수 있어요.<br />
-              * 실제 실행은 Node-RED에서 스케줄로 Task를 생성하는 방식이 가장 안정적입니다.
+              * 실제 자동 실행(앱 꺼져도 동작)은 다음 단계에서 Node-RED 스케줄러로 붙일게요.
             </div>
           </div>
         </div>
       </section>
 
       <!-- MAP -->
-      <section v-show="tab==='map'" class="page">
+      <section v-else-if="tab==='map'" class="page">
         <div class="card">
           <div class="card-title">로봇 위치</div>
           <div class="muted">
@@ -214,7 +246,7 @@
       </section>
 
       <!-- REPORT -->
-      <section v-show="tab==='report'" class="page">
+      <section v-else-if="tab==='report'" class="page">
         <div class="card">
           <div class="card-title">리포트</div>
           <div class="seg">
@@ -260,10 +292,12 @@
               {{ reportRange==='day' ? "시간대별 요청(오늘)" : "요일별 요청(이번 주)" }}
             </div>
 
-            <div class="chart-wrap">
-              <div class="chart">
+            <div class="chart-wrap" :class="{ week: reportRange==='week' }">
+              <div class="chart" :class="{ week: reportRange==='week' }">
                 <div v-for="(v, i) in chartSeries" :key="i" class="barcol">
-                  <div class="bar2" :style="{ height: `${barHeight(v)}%` }"></div>
+                  <div class="barbox">
+                    <div class="bar2" :style="{ height: `${barHeight(v)}%` }"></div>
+                  </div>
                   <div class="xlabel">{{ chartLabel(i) }}</div>
                 </div>
               </div>
@@ -277,7 +311,7 @@
       </section>
 
       <!-- HISTORY -->
-      <section v-show="tab==='history'" class="page">
+      <section v-else-if="tab==='history'" class="page">
         <div class="card">
           <div class="card-title">작업 기록</div>
 
@@ -309,6 +343,123 @@
           </div>
         </div>
       </section>
+
+      <!-- ✅ SETTINGS -->
+      <section v-else="tab==='settings'" class="page">
+        <div class="grid">
+          <div class="card">
+            <div class="card-title">Settings</div>
+
+            <div class="kvs">
+              <div class="kv">
+                <span>현재 위치(수동)</span>
+                <select v-model="settings.user_place" class="ctl">
+                  <option v-for="k in placeKeysAll" :key="k" :value="k">{{ uiPlace(k) }}</option>
+                </select>
+              </div>
+
+              <div class="kv">
+                <span>수분 목표(ml/일)</span>
+                <input class="ctl" type="number" min="0" step="50" v-model.number="settings.water_goal_ml" />
+              </div>
+            </div>
+
+            <div class="muted">
+              오늘 추정 섭취: <b>{{ today.water_ml }}ml</b>
+              <span v-if="settings.water_goal_ml > 0">
+                / 목표 <b>{{ settings.water_goal_ml }}ml</b> ({{ waterGoalPct }}%)
+              </span>
+            </div>
+
+            <div v-if="settings.water_goal_ml > 0" class="progress mt2">
+              <div class="bar" :style="{ width: waterGoalPct + '%' }"></div>
+            </div>
+          </div>
+
+          <div class="card wide">
+            <div class="card-title">Routines (시간 기반)</div>
+
+            <div class="kvs">
+              <div class="kv">
+                <span>시간</span>
+                <input class="ctl" type="time" v-model="routineDraft.time" />
+              </div>
+
+              <div class="kv">
+                <span>반복</span>
+                <div class="seg2">
+                  <button class="fbtn" :class="{ on: routineDraft.repeat==='daily' }" @click="routineDraft.repeat='daily'">매일</button>
+                  <button class="fbtn" :class="{ on: routineDraft.repeat==='weekly' }" @click="routineDraft.repeat='weekly'">매주</button>
+                </div>
+              </div>
+
+              <div v-if="routineDraft.repeat==='weekly'" class="days">
+                <button
+                  v-for="(d, idx) in weekDayLabels"
+                  :key="idx"
+                  class="fbtn"
+                  :class="{ on: routineDraft.days.includes(idx) }"
+                  @click="toggleDraftDay(idx)"
+                >{{ d }}</button>
+              </div>
+
+              <div class="kv">
+                <span>액션</span>
+                <select class="ctl" v-model="routineDraft.action_type">
+                  <option value="deliver_water">물 배달</option>
+                  <option value="collect_cup">컵 수거</option>
+                  <option value="collect_laundry">환경 정리</option>
+                </select>
+              </div>
+
+              <div class="kv">
+                <span>목적지</span>
+                <select class="ctl" v-model="routineDraft.target_mode">
+                  <option value="my">내 위치(설정)</option>
+                  <option value="custom">직접 선택</option>
+                </select>
+              </div>
+
+              <div v-if="routineDraft.target_mode==='custom'" class="kv">
+                <span>직접 선택</span>
+                <select class="ctl" v-model="routineDraft.target_area">
+                  <option v-for="k in placeKeysTargets" :key="k" :value="k">{{ uiPlace(k) }}</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="actions mt2">
+              <button class="btn" @click="addRoutine">루틴 추가</button>
+            </div>
+
+            <div v-if="routinesSorted.length === 0" class="muted">
+              아직 루틴이 없습니다. 위에서 추가해보세요.
+            </div>
+
+            <div v-else class="list">
+              <div v-for="r in routinesSorted" :key="r.id" class="item">
+                <div class="item-top">
+                  <div>
+                    <b>{{ r.time }}</b>
+                    <span class="muted" style="margin-left:8px">· {{ routineRepeatText(r) }}</span>
+                  </div>
+                  <div class="routine-actions">
+                    <button class="fbtn" :class="{ on: r.enabled }" @click="toggleRoutine(r)">{{ r.enabled ? "ON" : "OFF" }}</button>
+                    <button class="fbtn" @click="removeRoutine(r.id)">삭제</button>
+                  </div>
+                </div>
+                <div class="item-sub muted">
+                  {{ labelType(r.action_type) }} → {{ uiPlace(routineTargetArea(r)) }}
+                </div>
+              </div>
+            </div>
+
+            <div class="muted">
+              * 자동 실행은 다음 단계에서 Node-RED 스케줄러로 구현합니다(앱이 꺼져 있어도 동작).
+            </div>
+          </div>
+        </div>
+      </section>
     </main>
 
     <!-- Bottom Tabs -->
@@ -317,6 +468,7 @@
       <button class="tab" :class="{ on: tab==='map' }" @click="tab='map'">Map</button>
       <button class="tab" :class="{ on: tab==='report' }" @click="tab='report'">Report</button>
       <button class="tab" :class="{ on: tab==='history' }" @click="tab='history'">History</button>
+      <button class="tab" :class="{ on: tab==='settings' }" @click="tab='settings'">Settings</button>
     </nav>
 
     <!-- Toast -->
@@ -327,6 +479,7 @@
 <script setup>
 import { computed, onMounted, onBeforeUnmount, ref, watch } from "vue";
 import { getRobots, getTasks, getUserBrief } from "@/api/agv";
+import { getAppSettings, saveAppSettings } from "@/api/agv";
 
 /** -----------------------------
  *  UI state
@@ -388,6 +541,162 @@ function showToast(t) {
 }
 
 /** -----------------------------
+ *  Settings (localStorage)
+ *  ----------------------------- */
+const SETTINGS_LS_KEY = "AGV_UA_SETTINGS_V1";
+
+// 장소 키 (UI 표기용)
+const placeKeysAll = ["HALL", "CHARGE", "WATER", "DROP", "RES_A", "RES_B", "RES_C"];
+const placeKeysTargets = ["CHARGE", "WATER", "DROP", "RES_A", "RES_B", "RES_C"];
+
+// 주간 요일(월=0 ~ 일=6)
+const weekDayLabels = ["월", "화", "수", "목", "금", "토", "일"];
+
+function loadSettings() {
+  try {
+    const raw = localStorage.getItem(SETTINGS_LS_KEY);
+    if (!raw) return { user_place: "RES_A", water_goal_ml: 500, routines: [] };
+    const obj = JSON.parse(raw);
+    return {
+      user_place: String(obj?.user_place || "RES_A"),
+      water_goal_ml: Number(obj?.water_goal_ml || 0) || 0,
+      routines: Array.isArray(obj?.routines) ? obj.routines : [],
+    };
+  } catch {
+    return { user_place: "RES_A", water_goal_ml: 500, routines: [] };
+  }
+}
+
+function saveSettings() {
+  try {
+    localStorage.setItem(SETTINGS_LS_KEY, JSON.stringify(settings.value));
+  } catch {}
+}
+
+const settings = ref(loadSettings());
+let globalSaveTimer = null;
+
+watch(settings, () => {
+  clearTimeout(globalSaveTimer);
+  globalSaveTimer = setTimeout(async () => {
+    try {
+      await saveAppSettings({ settings: settings.value });
+    } catch (e) {
+      console.warn("saveAppSettings failed:", e);
+    }
+  }, 500);
+}, { deep: true });
+
+// 루틴 draft
+const routineDraft = ref({
+  time: "10:00",
+  repeat: "daily",      // daily | weekly
+  days: [],             // weekly일 때만 (월=0..일=6)
+  action_type: "deliver_water",
+  target_mode: "my",    // my | custom
+  target_area: "RES_A",
+});
+
+function toggleDraftDay(idx) {
+  const days = routineDraft.value.days;
+  const i = days.indexOf(idx);
+  if (i >= 0) days.splice(i, 1);
+  else days.push(idx);
+  days.sort((a, b) => a - b);
+}
+
+function normalizeTime(t) {
+  const m = String(t || "").match(/^([0-2]\d):([0-5]\d)$/);
+  if (!m) return "";
+  const hh = Number(m[1]);
+  const mm = Number(m[2]);
+  if (hh > 23) return "";
+  return `${pad2(hh)}:${pad2(mm)}`;
+}
+
+function addRoutine() {
+  const time = normalizeTime(routineDraft.value.time);
+  if (!time) {
+    showToast("시간을 올바르게 설정해줘 (예: 10:00)");
+    return;
+  }
+
+  const repeat = (routineDraft.value.repeat === "weekly") ? "weekly" : "daily";
+  let days = [];
+  if (repeat === "weekly") {
+    days = Array.isArray(routineDraft.value.days) ? [...routineDraft.value.days] : [];
+    if (days.length === 0) {
+      const d = new Date().getDay(); // 0=일..6=토
+      const mon0 = (d + 6) % 7;      // 월=0..일=6
+      days = [mon0];
+    }
+  }
+
+  const action_type = String(routineDraft.value.action_type || "deliver_water");
+  const target_mode = (routineDraft.value.target_mode === "custom") ? "custom" : "my";
+  const target_area = (target_mode === "custom")
+    ? String(routineDraft.value.target_area || settings.value.user_place || "RES_A")
+    : String(settings.value.user_place || "RES_A");
+
+  const r = {
+    id: `rt_${Date.now()}`,
+    enabled: true,
+    time,
+    repeat,
+    days,
+    action_type,
+    target_mode,
+    target_area,
+    created_at: Date.now(),
+  };
+
+  settings.value.routines.push(r);
+
+  // draft 일부 초기화(시간은 유지)
+  routineDraft.value.repeat = "daily";
+  routineDraft.value.days = [];
+  routineDraft.value.action_type = action_type;
+  routineDraft.value.target_mode = "my";
+  routineDraft.value.target_area = settings.value.user_place || "RES_A";
+
+  showToast("루틴이 추가됐어요");
+}
+
+function removeRoutine(id) {
+  settings.value.routines = settings.value.routines.filter(r => r.id !== id);
+  showToast("삭제했어요");
+}
+
+function toggleRoutine(r) {
+  r.enabled = !r.enabled;
+}
+
+function routineTargetArea(r) {
+  return (r?.target_mode === "custom")
+    ? (r.target_area || "RES_A")
+    : (settings.value.user_place || "RES_A");
+}
+
+function routineRepeatText(r) {
+  if (!r) return "";
+  if (r.repeat === "weekly") {
+    const days = Array.isArray(r.days) ? r.days : [];
+    const names = days.map(i => weekDayLabels[i]).filter(Boolean);
+    return names.length ? `매주(${names.join(",")})` : "매주";
+  }
+  return "매일";
+}
+
+const routinesSorted = computed(() => {
+  const list = Array.isArray(settings.value.routines) ? settings.value.routines : [];
+  return list.slice().sort((a, b) => String(a.time).localeCompare(String(b.time)));
+});
+
+const routinesPreview = computed(() => {
+  return routinesSorted.value.filter(r => r.enabled).slice(0, 3);
+});
+
+/** -----------------------------
  *  Telegram WebApp user
  *  ----------------------------- */
 const userId = ref("");     // ex) "tg_6802468707"
@@ -402,6 +711,21 @@ function initTelegramUser() {
   } else {
     userId.value = ""; // demo mode
     userName.value = "Demo";
+  }
+}
+
+async function loadGlobalSettings() {
+  try {
+    const res = await getAppSettings();
+    if (res?.settings) {
+      // 서버값이 있으면 그걸로 덮어쓰기(전역이니까)
+      settings.value = { ...settings.value, ...res.settings };
+    } else {
+      // 서버에 아무것도 없으면(처음) 현재 로컬값을 서버에 올려서 시드
+      await saveAppSettings({ settings: settings.value });
+    }
+  } catch (e) {
+    console.warn("loadGlobalSettings failed:", e);
   }
 }
 
@@ -541,11 +865,7 @@ function timeText(ts) {
 /** -----------------------------
  *  Derived: user-scoped tasks
  *  ----------------------------- */
-const myTasks = computed(() => {
-  // Telegram user id가 있으면 "내 작업만"
-  if (userId.value) return tasks.value.filter(t => t.user_id === userId.value);
-  return tasks.value; // demo mode: 전체
-});
+const myTasks = computed(() => tasks.value);
 
 /** -----------------------------
  *  Derived: robot / tasks
@@ -660,6 +980,15 @@ const avgByType = computed(() => ({
 }));
 
 const R = computed(() => (reportRange.value === "day" ? today.value : week.value));
+
+// ✅ 수분 목표 진행률(오늘 기준)
+const waterGoalPct = computed(() => {
+  const goal = Number(settings.value.water_goal_ml || 0);
+  if (!goal || goal <= 0) return 0;
+  const cur = Number(today.value?.water_ml || 0);
+  const pct = Math.round((cur / goal) * 100);
+  return Math.max(0, Math.min(100, pct));
+});
 
 /** -----------------------------
  *  Chart series (내 작업 기준)
@@ -1111,10 +1440,10 @@ function setupPolling() {
 }
 
 watch(tab, async (t) => {
-   setupPolling();
-   if (t === "report" && !briefText.value) {
-     await generateBrief(false);
-   }
+  setupPolling();
+  if (t === "report" && !briefText.value) {
+    await generateBrief(false);
+  }
 });
 
 /** report range 변경 시: 브리핑/차트 즉시 반영 */
@@ -1138,7 +1467,7 @@ const headerSub = computed(() => {
  *  ----------------------------- */
 onMounted(async () => {
   initTelegramUser();
-
+  await loadGlobalSettings();
   prevBodyOverflow = document.body.style.overflow;
   prevHtmlOverflow = document.documentElement.style.overflow;
 
@@ -1329,7 +1658,7 @@ onBeforeUnmount(() => {
   position: fixed;
   left: 0; right: 0; bottom: 0;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr); /* ✅ 5 tabs */
   gap: 8px;
   padding: 10px 10px 12px;
   background: rgba(255,255,255,0.78);
@@ -1517,6 +1846,7 @@ onBeforeUnmount(() => {
   border-radius: 14px;
   background: rgba(10,20,40,0.03);
   border: 1px solid var(--bd);
+  white-space: pre-line;
 }
 .actions{ display:flex; gap: 10px; flex-wrap: wrap; }
 
@@ -1528,15 +1858,39 @@ onBeforeUnmount(() => {
 }
 .chart{
   display:flex;
-  align-items: flex-end;
+  align-items: stretch;
   gap: 6px;
   height: 180px;
   padding: 8px;
   min-width: 560px; /* 모바일에서 24시간 막대가 넘치면 가로 스크롤 */
 }
+/* ✅ week는 min-width 해제 + 7개 꽉 차게 배치 */
+.chart.week{
+  min-width: 0;
+  width: 100%;
+  justify-content: space-between;
+  gap: 10px;
+}
+/* ✅ bar 높이의 기준 컨테이너 */
+.barbox{
+  flex: 1 1 auto;                /* ✅ 남는 높이 전부 */
+  width: 100%;
+  display:flex;
+  align-items: flex-end;         /* 막대 아래 정렬 */
+}
+.chart.week .barcol{
+  width: auto;
+  flex: 1 1 0;
+  max-width: 44px;
+}
+/* ✅ week(7개)는 스크롤 제거 + 빈 공간 제거 */
+.chart-wrap.week{
+  overflow-x: hidden;
+}
 .barcol{
   width: 18px;
   flex: 0 0 18px;
+  height: 100%;                  /* ✅ % height 계산 가능 */
   display:flex;
   flex-direction: column;
   align-items: center;
@@ -1549,8 +1903,10 @@ onBeforeUnmount(() => {
   border: 1px solid rgba(10,20,40,0.10);
 }
 .xlabel{
+  flex: 0 0 auto;
   font-size: 10px;
   color: var(--muted);
+  white-space: nowrap;
 }
 
 /* list */
@@ -1584,5 +1940,26 @@ onBeforeUnmount(() => {
   background: var(--accent);
   color: var(--accentText);
   border-color: rgba(0,0,0,0.10);
+}
+
+/* Settings controls */
+.ctl{
+  border: 1px solid var(--bd);
+  background: rgba(255,255,255,0.70);
+  color: var(--fg);
+  border-radius: 12px;
+  padding: 8px 10px;
+  font-size: 13px;
+  min-width: 160px;
+}
+.ctl:focus{ outline: none; box-shadow: 0 0 0 3px rgba(47,124,255,0.18); }
+
+.seg2{ display:flex; gap: 8px; justify-content: flex-end; }
+.days{ display:flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; margin-top: 6px; }
+
+.routine-actions{
+  display:flex;
+  gap: 8px;
+  align-items: center;
 }
 </style>

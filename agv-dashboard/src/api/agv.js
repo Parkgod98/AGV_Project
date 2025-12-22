@@ -57,3 +57,14 @@ export async function requestTask({ type, target_area, meta } = {}) {
   const res = await axios.post(`${BASE_URL}/user/request`, payload);
   return res.data;
 }
+
+
+export async function getAppSettings() {
+  const res = await axios.get(`${BASE_URL}/app/settings`);
+  return res.data;
+}
+
+export async function saveAppSettings({ settings }) {
+  const res = await axios.post(`${BASE_URL}/app/settings`, { settings });
+  return res.data;
+}
