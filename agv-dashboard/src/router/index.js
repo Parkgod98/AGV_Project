@@ -5,6 +5,7 @@ import TasksView from "../views/TasksView.vue";
 import EventsView from "../views/EventsView.vue";
 
 import UserApp from "../views/user/UserApp.vue";
+import InteractionView from "@/views/InteractionView.vue";
 
 
 const router = createRouter({
@@ -36,6 +37,12 @@ const router = createRouter({
       name: "user", 
       component: UserApp
     },
+    {
+      path: "/interaction",
+      name: "Interaction",
+      component: InteractionView,
+    }
+    
   ],
 });
 

@@ -1,132 +1,108 @@
+<!-- src/components/AlertsPanel.vue -->
 <script setup>
 import { computed } from "vue";
 
 const props = defineProps({
   robot: { type: Object, default: null },
   tasks: { type: Array, default: () => [] },
-  events: { type: Array, default: () => [] },
 });
+
+function pick(obj, keys, fallback = null) {
+  for (const k of keys) {
+    const v = obj?.[k];
+    if (v !== undefined && v !== null && v !== "") return v;
+  }
+  return fallback;
+}
+
+const battery = computed(() => {
+  const v = pick(props.robot, ["battery", "battery_pct", "batteryPercent"]);
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+});
+const errorCode = computed(() => pick(props.robot, ["error_code", "errorCode"], null));
+const updatedAt = computed(() => pick(props.robot, ["updated_at", "ts", "timestamp", "last_update"], null));
+const state = computed(() => pick(props.robot, ["state", "status", "robot_state"], null));
+const taskId = computed(() => pick(props.robot, ["task_id", "current_task_id"], null));
+
+const now = computed(() => Date.now());
+const staleMs = computed(() => {
+  if (!updatedAt.value) return null;
+  const t = Number(updatedAt.value);
+  if (!Number.isFinite(t)) return null;
+  return now.value - t;
+});
+
+const runningTasks = computed(() => props.tasks.filter((t) => t.status === "running"));
+const pendingTasks = computed(() => props.tasks.filter((t) => t.status === "pending"));
 
 const alerts = computed(() => {
   const list = [];
 
-  // 1) 로봇 오프라인
-  if (props.robot?.updated_at) {
-    const diff = Date.now() - props.robot.updated_at;
-    if (diff > 8000) {
-      list.push({
-        type: "offline",
-        msg: "AGV telemetry disconnected",
-      });
-    }
+  if (errorCode.value) list.push({ sev: "error", title: "Robot error_code set", detail: String(errorCode.value) });
+  if (battery.value != null && battery.value <= 20) list.push({ sev: "warn", title: "Low battery", detail: `${battery.value}%` });
+
+  if (staleMs.value != null && staleMs.value > 15_000) {
+    list.push({ sev: "warn", title: "Robot status stale", detail: `${Math.floor(staleMs.value / 1000)}s ago` });
   }
 
-  // 2) 로봇 에러 상태
-  if (props.robot?.state === "error") {
-    list.push({
-      type: "error",
-      msg: `Robot error (${props.robot.error_code || "unknown"})`,
-    });
+  if (state.value === "running" && !taskId.value) {
+    list.push({ sev: "warn", title: "Running but task_id is empty", detail: "Check status/task sync" });
   }
 
-  // 3) 배터리 낮음
-  if (props.robot?.battery != null && props.robot.battery < 20) {
-    list.push({
-      type: "battery",
-      msg: `Low battery (${props.robot.battery}%)`,
-    });
+  if (runningTasks.value.length > 1) {
+    list.push({ sev: "warn", title: "Multiple running tasks", detail: `count=${runningTasks.value.length}` });
   }
 
-  // 4) 최근 실패 태스크
-  const recentFail = props.tasks.find(t => t.status === "failed");
-  if (recentFail) {
-    list.push({
-      type: "task",
-      msg: `Task failed (${recentFail.task_id})`,
-    });
+  if (pendingTasks.value.length > 0) {
+    list.push({ sev: "info", title: "Pending tasks", detail: `count=${pendingTasks.value.length}` });
   }
 
+  if (list.length === 0) list.push({ sev: "ok", title: "All good", detail: "No alerts" });
   return list;
 });
 </script>
 
 <template>
-  <section class="alerts">
-    <header class="head">
-      <h4>Alerts</h4>
-    </header>
-
-    <div v-if="alerts.length === 0" class="ok">
-      <span class="dot" />
-      All systems normal
+  <div class="card">
+    <div class="head">
+      <div class="title">Alerts</div>
+      <span class="pill soft">{{ alerts.length }}</span>
     </div>
 
-    <ul v-else class="list">
-      <li v-for="(a, i) in alerts" :key="i" class="item">
-        <span class="badge">!</span>
-        <span class="text">{{ a.msg }}</span>
-      </li>
-    </ul>
-  </section>
+    <div class="list">
+      <div v-for="(a, idx) in alerts" :key="idx" class="a" :class="a.sev">
+        <div class="aTitle">{{ a.title }}</div>
+        <div class="aDetail">{{ a.detail }}</div>
+      </div>
+    </div>
+  </div>
 </template>
 
 <style scoped>
-.alerts {
-  padding: 14px 16px;
-  border-radius: 18px;
-  background: rgba(10, 12, 20, 0.55);
-  border: 1px solid rgba(255, 255, 255, 0.10);
+.card {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 16px;
+  padding: 14px;
   backdrop-filter: blur(10px);
 }
-
-.head h4 {
-  margin: 0 0 10px;
-  font-size: 14px;
-}
-
-.ok {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: rgba(255, 255, 255, 0.65);
-  font-size: 13px;
-}
-
-.ok .dot {
-  width: 8px;
-  height: 8px;
+.head { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+.title { font-weight:700; font-size:14px; }
+.pill {
+  font-size: 11px;
+  padding: 3px 8px;
   border-radius: 999px;
-  background: rgba(0, 220, 180, 0.9);
-  box-shadow: 0 0 0 5px rgba(0, 220, 180, 0.12);
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(255,255,255,0.06);
 }
-
-.list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-}
-
-.item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 0;
-  font-size: 13px;
-}
-
-.badge {
-  display: inline-flex;
-  width: 18px;
-  height: 18px;
-  border-radius: 6px;
-  align-items: center;
-  justify-content: center;
-  font-weight: 800;
-  color: #fff;
-  background: rgba(255, 80, 80, 0.9);
-}
-
-.text {
-  color: rgba(255, 255, 255, 0.85);
-}
+.pill.soft { opacity:.85; }
+.list { display:flex; flex-direction:column; gap:8px; }
+.a { padding: 10px 12px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.10); background: rgba(0,0,0,0.10); }
+.aTitle { font-size: 12px; font-weight: 700; }
+.aDetail { font-size: 11px; opacity: .80; margin-top: 2px; }
+.a.ok    { border-color: rgba(120,255,200,0.25); }
+.a.info  { border-color: rgba(120,200,255,0.25); }
+.a.warn  { border-color: rgba(255,220,120,0.30); }
+.a.error { border-color: rgba(255,120,120,0.40); }
 </style>

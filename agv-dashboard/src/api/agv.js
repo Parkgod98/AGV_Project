@@ -68,3 +68,24 @@ export async function saveAppSettings({ settings }) {
   const res = await axios.post(`${BASE_URL}/app/settings`, { settings });
   return res.data;
 }
+
+// ✅ Interaction 목록
+export async function getInteractions({ limit, type, input_mode, result, q } = {}) {
+  const params = {};
+  if (limit) params.limit = limit;
+  if (type) params.type = type;
+  if (input_mode) params.input_mode = input_mode;
+  if (result) params.result = result;
+  if (q) params.q = q;
+
+  const res = await axios.get(`${BASE_URL}/interactions`, { params });
+  return res.data; // { interactions, stats }
+}
+
+// ✅ Interaction 인사이트(LLM)
+export async function getInteractionInsight({ range = "week", refresh = false } = {}) {
+  const params = { range };
+  if (refresh) params.refresh = "1";
+  const res = await axios.get(`${BASE_URL}/interactions/insight`, { params });
+  return res.data; // { range, stats, insight, cached }
+}

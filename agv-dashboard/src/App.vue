@@ -28,7 +28,7 @@ const isUser = computed(() => route.path.startsWith("/user"));
 
       <nav class="nav">
         <RouterLink class="nav-link" to="/">Overview</RouterLink>
-        <RouterLink class="nav-link" to="/robots">Robots</RouterLink>
+        <RouterLink class="nav-link" to="/interaction">Interaction</RouterLink>
         <RouterLink class="nav-link" to="/tasks">Tasks</RouterLink>
         <RouterLink class="nav-link" to="/events">Events</RouterLink>
         <span class="nav-indicator" :data-path="route.path" />

@@ -1025,7 +1025,7 @@ function barHeight(v) {
 }
 function chartLabel(i) {
   if (reportRange.value === "day") return String(i);
-  return ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"][i] || "";
+  return ["월","화","수","목","금","토","일"][i] || "";
 }
 
 /** -----------------------------
