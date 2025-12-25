@@ -1,0 +1,18 @@
+train: dataset/train/images
+val: dataset/valid/images
+test: dataset/test/images
+
+nc: 3
+names: ['block', 'cup', 'doll']
+
+colors:        # BGR (OpenCV 기준)
+  0: [247, 142, 79]
+  1: [122, 122, 242]
+  2: [67, 193, 17]
+
+roboflow:
+  workspace: ssafy-04f1a
+  project: pjt_obj_detect_v2
+  version: 2
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/ssafy-04f1a/pjt_obj_detect_v2/dataset/2

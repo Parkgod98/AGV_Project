@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>LogsForm</class>
+ <widget class="QWidget" name="LogsForm">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>1000</width>
+    <height>700</height>
+   </rect>
+  </property>
+  <layout class="QVBoxLayout" name="vl_root">
+   <property name="spacing">
+    <number>10</number>
+   </property>
+   <property name="leftMargin">
+    <number>15</number>
+   </property>
+   <property name="topMargin">
+    <number>15</number>
+   </property>
+   <property name="rightMargin">
+    <number>15</number>
+   </property>
+   <property name="bottomMargin">
+    <number>15</number>
+   </property>
+   
+   <item>
+    <layout class="QHBoxLayout" name="hl_top">
+     <item>
+      <widget class="QLabel" name="lbl_title">
+       <property name="text">
+        <string>SYSTEM LOGS</string>
+       </property>
+       <property name="styleSheet">
+        <string notr="true">font-weight: bold; color: #3b82f6; font-size: 14px;</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="sp">
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+      </spacer>
+     </item>
+     <item>
+      <widget class="QPushButton" name="btn_clear">
+       <property name="minimumWidth">
+        <number>100</number>
+       </property>
+       <property name="text">
+        <string>Clear All</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+
+   <item>
+    <widget class="QTextEdit" name="text">
+     <property name="placeholderText">
+      <string>Waiting for logs...</string>
+     </property>
+     <property name="readOnly">
+      <bool>true</bool>
+     </property>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

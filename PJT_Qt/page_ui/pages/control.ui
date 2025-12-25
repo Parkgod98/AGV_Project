@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>ControlForm</class>
+ <widget class="QWidget" name="ControlForm">
+  <property name="geometry">
+   <rect><x>0</x><y>0</y><width>900</width><height>700</height></rect>
+  </property>
+  <layout class="QHBoxLayout" name="horizontalLayout_root">
+   <item>
+    <layout class="QVBoxLayout" name="verticalLayout_left">
+     <property name="spacing"><number>10</number></property>
+     
+     <item>
+      <widget class="QPushButton" name="btn_connect">
+       <property name="minimumSize"><size><width>0</width><height>45</height></size></property>
+       <property name="text"><string>CONNECT TO AGV</string></property>
+      </widget>
+     </item>
+
+     <item>
+      <widget class="QGroupBox" name="groupManualMove">
+       <property name="title"><string>Manual Move</string></property>
+       <layout class="QGridLayout" name="gl_move">
+        <item row="0" column="1"><widget class="QPushButton" name="btn_up"><property name="text"><string>▲</string></property></widget></item>
+        <item row="1" column="0"><widget class="QPushButton" name="btn_left"><property name="text"><string>◀</string></property></widget></item>
+        <item row="1" column="1"><widget class="QPushButton" name="btn_stop"><property name="text"><string>STOP</string></property></widget></item>
+        <item row="1" column="2"><widget class="QPushButton" name="btn_right"><property name="text"><string>▶</string></property></widget></item>
+        <item row="2" column="1"><widget class="QPushButton" name="btn_down"><property name="text"><string>▼</string></property></widget></item>
+       </layout>
+      </widget>
+     </item>
+
+     <item>
+      <layout class="QHBoxLayout" name="hl_settings">
+       <item>
+        <layout class="QVBoxLayout">
+         <item><widget class="QLabel" name="lbl_speed_title"><property name="text"><string>Speed</string></property></widget></item>
+         <item><widget class="QSlider" name="sld_speed"><property name="orientation"><enum>Qt::Horizontal</enum></property></widget></item>
+        </layout>
+       </item>
+       <item>
+        <layout class="QVBoxLayout">
+         <item><widget class="QLabel" name="lbl_grab_title"><property name="text"><string>Grab: 0%</string></property></widget></item>
+         <item><widget class="QDial" name="dial_grab"></widget></item>
+        </layout>
+       </item>
+      </layout>
+     </item>
+
+     <item>
+      <widget class="QGroupBox" name="groupArmControl">
+       <property name="title"><string>Arm Servo Control</string></property>
+       <layout class="QVBoxLayout" name="vl_arm">
+        <item><widget class="QLabel" name="lbl_s1"><property name="text"><string>S1: 90°</string></property></widget></item>
+        <item><widget class="QSlider" name="sld_s1"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="maximum"><number>180</number></property></widget></item>
+        <item><widget class="QLabel" name="lbl_s2"><property name="text"><string>S2: 90°</string></property></widget></item>
+        <item><widget class="QSlider" name="sld_s2"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="maximum"><number>180</number></property></widget></item>
+        <item><widget class="QLabel" name="lbl_s3"><property name="text"><string>S3: 90°</string></property></widget></item>
+        <item><widget class="QSlider" name="sld_s3"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="maximum"><number>180</number></property></widget></item>
+        <item><widget class="QLabel" name="lbl_s4"><property name="text"><string>S4: 90°</string></property></widget></item>
+        <item><widget class="QSlider" name="sld_s4"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="maximum"><number>180</number></property></widget></item>
+        <item><widget class="QLabel" name="lbl_s5"><property name="text"><string>S5: 90°</string></property></widget></item>
+        <item><widget class="QSlider" name="sld_s5"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="maximum"><number>180</number></property></widget></item>
+       </layout>
+      </widget>
+     </item>
+    </layout>
+   </item>
+
+   <item>
+    <widget class="QFrame" name="frameCamera">
+     <property name="minimumSize"><size><width>500</width><height>0</height></size></property>
+     <property name="frameShape"><enum>QFrame::StyledPanel</enum></property>
+     <layout class="QVBoxLayout" name="vl_cam">
+      <item><widget class="QLabel" name="lbl_camera_view">
+       <property name="text"><string>Streaming URL: /video_usb ...</string></property>
+       <property name="alignment"><enum>Qt::AlignCenter</enum></property>
+      </widget></item>
+     </layout>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+</ui>

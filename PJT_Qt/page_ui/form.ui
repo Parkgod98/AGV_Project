@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>892</width>
+    <height>480</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>AGV HMI</string>
+  </property>
+  <widget class="QWidget" name="centralwidget">
+   <layout class="QVBoxLayout" name="vl_root">
+    <item>
+     <widget class="QFrame" name="frame_nav">
+      <property name="minimumSize">
+       <size>
+        <width>0</width>
+        <height>60</height>
+       </size>
+      </property>
+      <property name="frameShape">
+       <enum>QFrame::Shape::StyledPanel</enum>
+      </property>
+      <layout class="QHBoxLayout" name="hl_nav">
+       <property name="spacing">
+        <number>8</number>
+       </property>
+       <item>
+        <widget class="QPushButton" name="btn_overview">
+         <property name="minimumSize">
+          <size>
+           <width>110</width>
+           <height>44</height>
+          </size>
+         </property>
+         <property name="text">
+          <string>OVERVIEW</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="btn_control">
+         <property name="minimumSize">
+          <size>
+           <width>110</width>
+           <height>44</height>
+          </size>
+         </property>
+         <property name="text">
+          <string>CONTROL</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="btn_analytics">
+         <property name="minimumSize">
+          <size>
+           <width>130</width>
+           <height>44</height>
+          </size>
+         </property>
+         <property name="text">
+          <string>ANALYTICS</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="btn_map">
+         <property name="minimumSize">
+          <size>
+           <width>90</width>
+           <height>44</height>
+          </size>
+         </property>
+         <property name="text">
+          <string>MAP</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="btn_tasks">
+         <property name="minimumSize">
+          <size>
+           <width>90</width>
+           <height>44</height>
+          </size>
+         </property>
+         <property name="text">
+          <string>TASKS</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="btn_logs">
+         <property name="minimumSize">
+          <size>
+           <width>80</width>
+           <height>44</height>
+          </size>
+         </property>
+         <property name="text">
+          <string>LOGS</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <spacer name="spacer_nav">
+         <property name="orientation">
+          <enum>Qt::Orientation::Horizontal</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>40</width>
+           <height>20</height>
+          </size>
+         </property>
+        </spacer>
+       </item>
+       <item>
+        <widget class="QLabel" name="lbl_top_status">
+         <property name="minimumSize">
+          <size>
+           <width>180</width>
+           <height>0</height>
+          </size>
+         </property>
+         <property name="text">
+          <string>MQTT: - | FS: -</string>
+         </property>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+    </item>
+    <item>
+     <widget class="QStackedWidget" name="stackedWidget">
+      <property name="currentIndex">
+       <number>0</number>
+      </property>
+      <widget class="QWidget" name="page_overview"/>
+      <widget class="QWidget" name="page_control"/>
+      <widget class="QWidget" name="page_analytics"/>
+      <widget class="QWidget" name="page_map"/>
+      <widget class="QWidget" name="page_tasks"/>
+      <widget class="QWidget" name="page_logs"/>
+     </widget>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QStatusBar" name="statusbar">
+   <property name="visible">
+    <bool>true</bool>
+   </property>
+  </widget>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>
