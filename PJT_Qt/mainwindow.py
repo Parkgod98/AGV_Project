@@ -5,7 +5,7 @@ import time
 from datetime import datetime
 
 import pytz
-import numpy as np
+import numpy as nps
 import cv2
 
 from PySide6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QSplashScreen

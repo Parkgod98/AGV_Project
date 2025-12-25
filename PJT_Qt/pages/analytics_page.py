@@ -91,7 +91,7 @@ class AnalyticsPage(QWidget):
         row = QHBoxLayout()
         # 4개의 카드를 모두 생성하여 변수에 할당
         c1, self.lb_kpi_total = self._make_kpi_card("Total Tasks", "0")
-        c2, self.lb_kpi_active = self._make_kpi_card("Active Days", "0")
+        c2, self.lb_kpi_active = self._make_kpi_card("Active Minutes", "0")
 
         for c in (c1, c2):
             row.addWidget(c, 1)
