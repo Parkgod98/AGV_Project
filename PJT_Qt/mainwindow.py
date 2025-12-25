@@ -566,18 +566,6 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-        # -------------------------
-        # Camera Frame Handling
-        # -------------------------
-        def on_camera_frame(self, pixmap):
-            """
-            통합형 CameraWorker가 추론(YOLO)까지 마친 QPixmap을 보내줍니다.
-            이를 그대로 ControlPage에 표시합니다.
-            """
-            if pixmap and not pixmap.isNull():
-                # 이미 추론 결과(박스)가 그려진 상태이므로 바로 UI에 업데이트
-                self.page_control.set_camera_pixmap(pixmap)
-
     def closeEvent(self, event):
         try:
             if self.cam is not None:

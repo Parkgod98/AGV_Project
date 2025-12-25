@@ -1,11 +1,15 @@
 import time
 from PySide6.QtWidgets import QWidget
 from PySide6.QtCore import Qt, Signal
-from page_ui.pages.ui_control import Ui_ControlForm
+# 파일 위치가 꼬였을 수 있으니 명확히 임포트
+try:
+    from page_ui.pages.ui_control import Ui_ControlForm
+except ImportError:
+    from page_ui.ui_control import Ui_ControlForm
 
 class ControlPage(QWidget):
-    # MainWindow와의 통신을 위한 시그널
-    interactionCommand = Signal(dict)
+    # MainWindow와 일치시킨 시그널: (mode, raw, parsed)
+    interactionCommand = Signal(str, object, dict)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -14,7 +18,7 @@ class ControlPage(QWidget):
 
         self.is_connected = False
 
-        # 카메라 영역과 제어 영역 비율 설정 (2:1)
+        # UI 비율 강제 조정 (제어판 1 : 카메라 2)
         self.ui.horizontalLayout_root.setStretch(0, 1)
         self.ui.horizontalLayout_root.setStretch(1, 2)
 
@@ -22,62 +26,88 @@ class ControlPage(QWidget):
         self.bind_events()
 
     def init_style(self):
+        # 카메라 뷰 대기 화면 및 테두리 테마 적용
+        self.ui.frameCamera.setStyleSheet("""
+            background-color: #000000;
+            border: 2px solid #333a45;
+            border-radius: 20px;
+        """)
+        self.ui.lbl_camera_view.setText("WAITING FOR AGV CAMERA...")
+        self.ui.lbl_camera_view.setStyleSheet("color: #777; font-weight: bold; border: none;")
+
+        # 버튼 및 그룹박스 스타일
         self.setStyleSheet("""
-            QGroupBox { font-size: 13px; font-weight: bold; color: white; border: 1px solid #333a45; margin-top: 10px; padding-top: 15px; }
-            QLabel { font-size: 11px; color: #ced4da; }
-            QPushButton#btn_connect { background-color: #2d5af1; font-size: 14px; font-weight: bold; color: white; border-radius: 5px; }
-            QPushButton { background-color: #2a2f3b; color: white; border-radius: 4px; padding: 5px; }
-            QSlider::handle:horizontal { background: #60a5fa; width: 14px; height: 14px; margin: -5px 0; border-radius: 7px; }
+            QGroupBox { font-size: 15px; font-weight: bold; color: white; border: 1px solid #444; margin-top: 5px; padding-top: 15px; }
+            QLabel { font-size: 13px; color: #ddd; }
+            QPushButton#btn_connect { background-color: #2d5af1; font-size: 18px; font-weight: bold; color: white; border-radius: 10px; }
+            QPushButton { background-color: #2a2f3b; color: white; border-radius: 8px; font-size: 16px; }
+            QSlider::handle:horizontal { background: #60a5fa; width: 22px; height: 22px; margin: -8px 0; border-radius: 11px; }
         """)
 
     def bind_events(self):
         self.ui.btn_connect.clicked.connect(self.toggle_connection)
 
-        # 이동 버튼 (Pressed/Released 기반)
-        for btn, direction in [
-            (self.ui.btn_up, "forward"), (self.ui.btn_down, "backward"),
-            (self.ui.btn_left, "left"), (self.ui.btn_right, "right")
-        ]:
-            btn.pressed.connect(lambda d=direction: self.send_cmd("move", d))
-            btn.released.connect(lambda: self.send_cmd("move", "stop"))
+        # 🚀 수동 이동 버튼 이벤트 (Pressed=전송, Released=정지)
+        # 람다 함수를 사용하여 인자를 정확히 전달
+        self.ui.btn_up.pressed.connect(lambda: self.emit_mqtt("move", "forward"))
+        self.ui.btn_down.pressed.connect(lambda: self.emit_mqtt("move", "backward"))
+        self.ui.btn_left.pressed.connect(lambda: self.emit_mqtt("move", "left"))
+        self.ui.btn_right.pressed.connect(lambda: self.emit_mqtt("move", "right"))
 
-        self.ui.btn_stop.clicked.connect(lambda: self.send_cmd("move", "stop"))
+        # 버튼에서 손을 떼면 STOP
+        stop_btns = [self.ui.btn_up, self.ui.btn_down, self.ui.btn_left, self.ui.btn_right]
+        for b in stop_btns:
+            b.released.connect(lambda: self.emit_mqtt("move", "stop"))
 
-        # 스피드 및 그랩
-        self.ui.sld_speed.valueChanged.connect(lambda v: self.send_cmd("speed", v))
+        self.ui.btn_stop.clicked.connect(lambda: self.emit_mqtt("move", "stop"))
+
+        # 속도 및 그랩
+        self.ui.sld_speed.valueChanged.connect(lambda v: self.emit_mqtt("speed", v))
         self.ui.dial_grab.valueChanged.connect(self._on_grab_changed)
 
-        # 서보 슬라이더 5개 (번호별 매핑)
-        self.ui.sld_s1.valueChanged.connect(lambda v: self._on_servo_changed(1, v))
-        self.ui.sld_s2.valueChanged.connect(lambda v: self._on_servo_changed(2, v))
-        self.ui.sld_s3.valueChanged.connect(lambda v: self._on_servo_changed(3, v))
-        self.ui.sld_s4.valueChanged.connect(lambda v: self._on_servo_changed(4, v))
-        self.ui.sld_s5.valueChanged.connect(lambda v: self._on_servo_changed(5, v))
+        # 서보 1, 2, 3 (4, 5는 UI에서 삭제될 예정이므로 3까지만 연결)
+        for i in range(1, 4):
+            if hasattr(self.ui, f"sld_s{i}"):
+                sld = getattr(self.ui, f"sld_s{i}")
+                sld.valueChanged.connect(lambda v, n=i: self._on_servo_changed(n, v))
 
     def _on_grab_changed(self, v):
-        self.ui.lbl_grab_title.setText(f"Grab: {v}%")
-        self.send_cmd("grab", v)
+        self.ui.lbl_grab_title.setText(f"Grab (S4): {v}°")
+        self.emit_mqtt("arm", {"servo": 4, "angle": v})
 
-    def _on_servo_changed(self, num, val):
-        label = getattr(self.ui, f"lbl_s{num}")
-        label.setText(f"S{num}: {val}°")
-        self.send_cmd("arm", {"servo": num, "angle": val})
+    def _on_servo_changed(self, n, v):
+        lbl = getattr(self.ui, f"lbl_s{n}")
+        lbl.setText(f"S{n}: {v}°")
+        self.emit_mqtt("arm", {"servo": n, "angle": v})
 
     def toggle_connection(self):
-        if not self.is_connected:
-            self.is_connected = True
-            self.ui.btn_connect.setText("CONNECTED (READY)")
+        self.is_connected = not self.is_connected
+        if self.is_connected:
+            self.ui.btn_connect.setText("AGV CONNECTED")
             self.ui.btn_connect.setStyleSheet("background-color: #10b981; color: white; font-weight: bold;")
+            self.emit_mqtt("system", "connect")
         else:
-            self.is_connected = False
             self.ui.btn_connect.setText("CONNECT TO AGV")
             self.ui.btn_connect.setStyleSheet("background-color: #2d5af1; color: white;")
+            self.emit_mqtt("system", "disconnect")
 
-    def send_cmd(self, action, value):
-        if not self.is_connected: return
-        cmd = {"action": action, "value": value, "ts": time.time()}
-        self.interactionCommand.emit(cmd)
+    def emit_mqtt(self, action, value):
+        # 연결 안 됐을 때 system 명령 외에는 무시
+        if not self.is_connected and action != "system":
+            return
 
-    def update_camera_frame(self, pixmap):
-        """MainWindow에서 호출하여 카메라 화면 갱신"""
-        self.ui.lbl_camera_view.setPixmap(pixmap)
+        # 🚀 MainWindow.py가 원하는 3단 구조 (input_mode, raw_data, parsed_data)
+        parsed_data = {
+            "mqtt_topic": "interaction/parsed",
+            "mqtt_payload": {
+                "action": action,
+                "value": value,
+                "ts": int(time.time() * 1000)
+            }
+        }
+        self.interactionCommand.emit(action, str(value), parsed_data)
+
+    def set_camera_pixmap(self, pixmap):
+        if pixmap and not pixmap.isNull():
+            self.ui.lbl_camera_view.setPixmap(pixmap.scaled(
+                self.ui.lbl_camera_view.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
