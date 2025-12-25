@@ -30,10 +30,6 @@
                 <b>{{ uiPlace(currentPlaceKey) }}</b>
               </div>
               <div class="kv">
-                <span>다음 목적지</span>
-                <b>{{ nextTargetLabel }}</b>
-              </div>
-              <div class="kv">
                 <span>배터리</span>
                 <b>{{ robot?.battery ?? "—" }}%</b>
               </div>
@@ -92,7 +88,7 @@
           </div>
 
           <div class="card wide">
-            <div class="card-title">작업별 평균 소요(오늘/이번 주)</div>
+            <div class="card-title">작업별 평균 소요(이번 주)</div>
             <div class="chips">
               <div class="chip">
                 <span>물 배달</span><b>{{ avgByType.deliver_water ?? "—" }}s</b>
@@ -150,10 +146,6 @@
 
             <div v-if="settings.routines.length > routinesPreview.length" class="muted">
               + {{ settings.routines.length - routinesPreview.length }}개 더 있음 (Settings에서 확인)
-            </div>
-
-            <div class="muted">
-              * 실제 자동 실행(앱 꺼져도 동작)은 다음 단계에서 Node-RED 스케줄러로 붙일게요.
             </div>
           </div>
         </div>
@@ -239,8 +231,8 @@
         <div class="card mt">
           <div class="card-title">상세</div>
           <div class="kvs">
-            <div class="kv"><span>구역</span><b>{{ uiArea(robot?.area) }}</b></div>
-            <div class="kv"><span>Pose</span><b>{{ poseText }}</b></div>
+            <div class="kv"><span>구역</span><b>{{ uiPlace(currentPlaceKey) }}</b></div>
+            <!-- <div class="kv"><span>Pose</span><b>{{ poseText }}</b></div> -->
           </div>
         </div>
       </section>
@@ -280,9 +272,6 @@
                  <button class="btn" @click="generateBrief(true)" :disabled="briefLoading">
                   {{ briefLoading ? "생성 중…" : "브리핑 갱신" }}
                  </button>
-              </div>
-              <div class="muted">
-                * 브리핑은 /api/user/brief(LLM) 호출 → 실패 시 로컬 템플릿으로 대체합니다.
               </div>
             </div>
           </div>
@@ -452,10 +441,6 @@
                   {{ labelType(r.action_type) }} → {{ uiPlace(routineTargetArea(r)) }}
                 </div>
               </div>
-            </div>
-
-            <div class="muted">
-              * 자동 실행은 다음 단계에서 Node-RED 스케줄러로 구현합니다(앱이 꺼져 있어도 동작).
             </div>
           </div>
         </div>
@@ -710,7 +695,7 @@ function initTelegramUser() {
     userName.value = (u.first_name || u.username || "사용자");
   } else {
     userId.value = ""; // demo mode
-    userName.value = "Demo";
+    userName.value = "장유진";
   }
 }
 
@@ -1396,6 +1381,7 @@ function setReportRange(v) {
 async function refreshRobots() {
   try {
     robots.value = (await getRobots({ limit: 20 })) || [];
+    lastFetchAt.value = Date.now(); // ✅ 즉시 갱신 (헤더 시간 실시간 반영)
   } catch {}
 }
 
@@ -1430,12 +1416,12 @@ function setupPolling() {
   pollTasksTimer = null;
 
   // robots: 기본 800ms, map에서는 350ms
-  const robotInterval = (tab.value === "map") ? 350 : 800;
+  const robotInterval = (tab.value === "map") ? 200 : 200; // 원래 350, 800
   pollRobotsTimer = setInterval(refreshRobots, robotInterval);
 
   // tasks: map이 아닐 때만 2500ms
   if (tab.value !== "map") {
-    pollTasksTimer = setInterval(refreshTasks, 2500);
+    pollTasksTimer = setInterval(refreshTasks, 200); // 2500
   }
 }
 
@@ -1458,8 +1444,8 @@ watch(reportRange, async () => {
 const headerSub = computed(() => {
   const name = userName.value ? `${userName.value}님` : "사용자";
   const last = lastFetchAt.value ? new Date(lastFetchAt.value).toLocaleTimeString() : "—";
-  const mode = userId.value ? "내 작업" : "Demo";
-  return `${name} · ${mode} · 마지막 갱신 ${last}`;
+  const mode = userId.value ? "내 작업" : "";
+  return `${name} · ${mode} 마지막 갱신 ${last}`;
 });
 
 /** -----------------------------
@@ -1750,8 +1736,9 @@ onBeforeUnmount(() => {
   font-size: 12px;
   background: rgba(255,255,255,0.55);
 }
+
 .z-charge{ left: 40%; top: 6%; width: 20%; height: 12%; text-align:center; }
-.z-water { left: 8%;  top: 22%; width: 22%; height: 16%; }
+.z-water { left: 8%;  top: 20%; width: 22%; height: 16%; }
 .z-drop  { left: 70%; top: 30%; width: 22%; height: 16%; }
 
 .z-a{ left: 10%; top: 66%; width: 24%; height: 18%; }
