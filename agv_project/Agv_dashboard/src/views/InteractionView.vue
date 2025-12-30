@@ -231,47 +231,78 @@ onMounted(async () => {
   color: inherit;
   outline: none;
 }
+
+/* ✅ 버튼 수정: 튀는 색 제거, 밝기와 테두리로만 구분 (세련된 느낌) */
 .btn {
-  padding: 10px 12px;
+  padding: 10px 14px;
   border-radius: 12px;
-  border: 1px solid rgba(255,255,255,0.14);
-  background: rgba(255,255,255,0.06);
+  
+  /* 배경은 투명하지만 테두리를 살짝 밝게 해서 버튼임을 명확히 함 */
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.2); 
+  color: rgba(255, 255, 255, 0.9);
+  
+  font-weight: 600;
   cursor: pointer;
+  transition: all 0.2s;
 }
-.btn:hover { background: rgba(255,255,255,0.10); }
-.btn.danger { border-color: rgba(255,120,120,0.35); }
+
+/* 호버 시 배경을 살짝 밝혀서 인터랙션 피드백 */
+.btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.4);
+}
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ✅ Force 버튼: 빨간색 배경 대신, 텍스트와 테두리만 은은한 붉은빛 */
+.btn.danger {
+  color: #ffcfcf;
+  border-color: rgba(255, 100, 100, 0.35);
+  background: rgba(255, 0, 0, 0.05); /* 아주 연한 붉은 틴트 */
+}
+.btn.danger:hover {
+  background: rgba(255, 0, 0, 0.15);
+  border-color: rgba(255, 100, 100, 0.6);
+}
 
 .kpis { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:8px; margin-top:10px; }
 .kpi { padding: 10px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.10); background: rgba(0,0,0,0.10); }
 .k { font-size: 11px; opacity:.75; margin-bottom:6px; }
 .v { font-weight: 800; font-size: 14px; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono","Courier New", monospace; font-size: 12px; }
-/* ✅ Logs 내부 스크롤 */
+
+/* Logs 내부 스크롤 */
 .tableWrap{
-  max-height: 520px;      /* 원하는 높이로 조절 */
-  overflow: auto;         /* 세로/가로 스크롤 자동 */
+  max-height: 520px;
+  overflow: auto;
   padding-right: 2px;
 }
-/* ✅ 가로가 좁으면 테이블 자체가 줄어들면서 겹치니까 min-width를 줌 */
 .table{
-  min-width: 1100px;      /* 화면이 작으면 가로 스크롤 생김 */
+  min-width: 1100px;
   display:flex;
   flex-direction:column;
   gap:6px;
 }
 .tr { display:grid; grid-template-columns: 150px 90px 120px 110px 110px 260px 1fr; gap:10px; padding: 10px 12px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.10); background: rgba(0,0,0,0.10); }
-/* ✅ 헤더는 스크롤해도 위에 붙게 */
+
+/* ✅ 헤더 수정: 회색 대신 '아주 짙은 어둠'을 사용하여 이질감 최소화 */
 .tr.head{
   position: sticky;
   top: 0;
   z-index: 2;
-  opacity:.85;
   font-size: 11px;
   font-weight: 800;
-  background: rgba(0,0,0,0.35);
-  backdrop-filter: blur(8px);
+  
+  /* #131518은 일반적인 다크모드 배경색과 거의 흡사하여 튀지 않음 */
+  background: #131518; 
+  
+  /* 테두리를 아주 연하게 줘서 구분선 역할만 수행 */
+  border-bottom: 1px solid rgba(255,255,255,0.15);
 }
-/* ✅ 겹침 방지 핵심: grid item은 min-width: auto라서 길면 튀어나옴 → 0으로 */
+
 .tr > .cell{
   min-width: 0;
   overflow: hidden;

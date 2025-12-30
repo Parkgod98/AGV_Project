@@ -67,8 +67,8 @@ onMounted(async () => {
   await refreshAll();
 
   // ✅ UserApp처럼 로봇은 빠르게(부드럽게), 태스크는 느리게
-  fastTimer = setInterval(refreshFast, 350);
-  slowTimer = setInterval(refreshSlow, 10000);
+  fastTimer = setInterval(refreshFast, 200);
+  slowTimer = setInterval(refreshSlow, 400);
 });
 
 onBeforeUnmount(() => {
