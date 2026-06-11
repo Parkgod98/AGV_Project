@@ -1,0 +1,147 @@
+/* =========================
+   Base
+========================= */
+QMainWindow {
+  background: #0c101a;   /* 기존 #0f1115 → 네이비 블랙 */
+}
+
+QLabel {
+  color: #dbe4f0;
+  font-size: 13px;
+}
+
+
+/* =========================
+   Navigation Frame
+========================= */
+QFrame#frame_nav {
+  background: #121a2b;
+  border: 1px solid #243a5e;
+  border-radius: 12px;
+}
+
+
+/* =========================
+   Buttons
+========================= */
+QPushButton {
+  background: #18233a;
+  border: 1px solid #2f4c7a;
+  border-radius: 12px;
+  color: #eaf2ff;
+  padding: 8px 14px;
+  font-size: 13px;
+}
+
+QPushButton:hover {
+  background: #1f2f4d;
+  border: 1px solid #4ea1ff;   /* 🔵 포인트 블루 */
+}
+
+QPushButton:checked {
+  background: #233a5e;
+  border: 1px solid #4ea1ff;
+}
+
+
+/* =========================
+   GroupBox
+========================= */
+QGroupBox {
+  color: #dbe4f0;
+  border: 1px solid #243a5e;
+  border-radius: 14px;
+  margin-top: 10px;
+}
+
+QGroupBox::title {
+  subcontrol-origin: margin;
+  left: 12px;
+  padding: 0 6px;
+  color: #9fb7df;
+}
+
+
+/* =========================
+   Cards (Overview)
+========================= */
+QFrame#card,
+QFrame#card_batt,
+QFrame#card_co2_max,
+QFrame#card_co2_cur,
+QFrame#card_temp {
+  background: #121a2b;
+  border: 1px solid #243a5e;
+  border-radius: 18px;
+  padding: 8px;
+}
+
+/* 카드 안 텍스트 */
+QFrame#card QLabel,
+QFrame#card_batt QLabel,
+QFrame#card_co2_max QLabel,
+QFrame#card_co2_cur QLabel,
+QFrame#card_temp QLabel {
+  color: #eaf2ff;
+}
+
+
+/* =========================
+   Card Typography
+========================= */
+QLabel#cardTitle {
+  color: #9fb7df;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+QLabel#lbl_batt_value,
+QLabel#lbl_task_value,
+QLabel#lbl_time_value,
+QLabel#lbl_temp_value {
+  color: #ffffff;
+  font-size: 30px;
+  font-weight: 700;
+}
+
+QLabel#cardUnit {
+  color: #9fb7df;
+  font-size: 12px;
+}
+
+
+/* =========================
+   Text / Tables
+========================= */
+QTextEdit {
+  background: #0b1220;
+  border: 1px solid #243a5e;
+  border-radius: 14px;
+  color: #dbe4f0;
+}
+
+QTableWidget {
+  background: #0b1220;
+  border: 1px solid #243a5e;
+  border-radius: 14px;
+  color: #dbe4f0;
+  gridline-color: #243a5e;
+}
+
+QHeaderView::section {
+  background: #121a2b;
+  color: #dbe4f0;
+  border: 1px solid #243a5e;
+}
+
+
+/* =========================
+   MAP THEME TOKENS (Blue-Tech)
+========================= */
+QGraphicsView#mapView {
+  background: #0b1220;
+  border: 1px solid #2f4c7a;
+  border-radius: 14px;
+
+  /* QSS Theme Tokens */
+}

@@ -1,0 +1,7 @@
+PySide6
+paho-mqtt
+firebase-admin
+pytz
+opencv-python
+pyqtgraph
+numpy

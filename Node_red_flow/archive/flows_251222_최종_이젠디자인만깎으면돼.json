@@ -1,0 +1,1800 @@
+[
+    {
+        "id": "49f8711fc297a8c1",
+        "type": "tab",
+        "label": "플로우 1",
+        "disabled": false,
+        "info": "",
+        "env": []
+    },
+    {
+        "id": "048a808c4f50c1eb",
+        "type": "telegram receiver",
+        "z": "49f8711fc297a8c1",
+        "name": "",
+        "bot": "d10c4415b361b866",
+        "saveDataDir": "",
+        "filterCommands": false,
+        "hasinput": false,
+        "inputs": 0,
+        "handleallupdates": false,
+        "x": 350,
+        "y": 480,
+        "wires": [
+            [
+                "7476d3bed8965c26"
+            ],
+            []
+        ]
+    },
+    {
+        "id": "d1e13ead5e796c2d",
+        "type": "telegram sender",
+        "z": "49f8711fc297a8c1",
+        "name": "",
+        "bot": "d10c4415b361b866",
+        "haserroroutput": false,
+        "outputs": 1,
+        "x": 1170,
+        "y": 240,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "7476d3bed8965c26",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "function 1",
+        "func": "function pad(n, w = 2) { return String(n).padStart(w, '0'); }\n\n// KST 기준: YYYYMMDD_HHMMSS_mmm\nfunction tsKST() {\n  const k = new Date(Date.now() + 9 * 60 * 60 * 1000); // UTC+9\n  const y = k.getUTCFullYear();\n  const mo = pad(k.getUTCMonth() + 1);\n  const d = pad(k.getUTCDate());\n  const hh = pad(k.getUTCHours());\n  const mm = pad(k.getUTCMinutes());\n  const ss = pad(k.getUTCSeconds());\n  const ms = pad(k.getUTCMilliseconds(), 3);\n  return `${y}${mo}${d}_${hh}${mm}${ss}_${ms}`;\n}\n\nfunction makeInteractionId(chatId, mode) {\n  const ts = tsKST();\n  const safeMode = (mode || \"text\").toLowerCase();\n  return `it_${ts}_tg_${chatId}_${safeMode}`;\n}\n\nfunction makeMqtt(chatId, text, interactionId, topic, type, target_area, inputKind) {\n  return {\n    topic,\n    payload: JSON.stringify({\n      type,\n      target_area,\n      user_id: `tg_${chatId}`,\n      meta: { source: \"telegram\", input: inputKind, raw: text, interaction_id: interactionId }\n    })\n  };\n}\n\nfunction makeFsMsg(interactionObj) {\n  // task_id는 null 덮어쓰기 방지(아예 제거)\n  const copy = { ...interactionObj };\n  if (\"task_id\" in copy) delete copy.task_id;\n  return { payload: copy };\n}\n\nfunction makeInteractionBase(chatId, interactionId, inputMode, rawInput) {\n  return {\n    ts: Date.now(),\n    interaction_id: interactionId,\n    source: \"telegram\",\n    user_id: `tg_${chatId}`,\n    input_mode: inputMode,\n    raw_input: rawInput,\n    parsed: null,\n    result: \"pending\",\n    error: null\n  };\n}\n\n// -------------------- 입력 추출 --------------------\nconst chatId = msg.payload?.chatId;\nconst text = (msg.payload?.content || \"\").trim();\n\n// WebApp URL\nconst WEBAPP_URL = global.get(\"WEBAPP_URL\") || \"https://subaru-pod-visit-woods.trycloudflare.com/user\";\n\n// 버튼 목록(정확히 매칭)\nconst BUTTONS = new Set([\n  \"☕ 물 가져와줘\",\n  \"🥤 컵 가져가줘\",\n  \"🧹 환경 정리해줘\",\n  \"📍 지금 상태 알려줘\",\n  \"📊 리포트 & 대시보드 열기\"\n]);\n\n// -------------------- 0) voice (가장 먼저 return) --------------------\nif (msg.payload?.type === \"voice\" && msg.payload?.weblink) {\n  const interactionId = makeInteractionId(chatId, \"voice\");\n  msg._interactionId = interactionId;\n\n  const weblink = msg.payload.weblink;\n  const fileId = msg.payload.content;\n\n  const interaction = makeInteractionBase(chatId, interactionId, \"voice\", fileId);\n  interaction.meta = { weblink };\n\n  const tgMsg = {\n    ...msg,\n    payload: { chatId, type: \"message\", content: \"🎙️ 음성 인식 중이에요…\", options: {} }\n  };\n\n  const sttMsg = {\n    _tg: { chatId },\n    _interactionId: interactionId,\n    weblink\n  };\n\n  // out1: tg, out4: fs, out5: stt\n  return [tgMsg, null, null, makeFsMsg(interaction), sttMsg];\n}\n\n// -------------------- 1) 빈 입력 --------------------\nif (!text) {\n  const interactionId = makeInteractionId(chatId, \"text\");\n  msg._interactionId = interactionId;\n\n  const interaction = makeInteractionBase(chatId, interactionId, \"text\", text);\n  interaction.result = \"rejected\";\n  interaction.error = { stage: \"input\", message: \"empty text\" };\n\n  msg.payload = {\n    chatId, type: \"message\",\n    content: \"내용이 비어 있어요 🙂\\n아래 버튼을 눌러서 요청해 주세요.\",\n    options: {}\n  };\n  return [msg, null, null, makeFsMsg(interaction)];\n}\n\n// -------------------- 2) /start --------------------\nif (text === \"/start\") {\n  const interactionId = makeInteractionId(chatId, \"command\");\n  msg._interactionId = interactionId;\n\n  if (!flow.get(\"default_area_\" + chatId)) flow.set(\"default_area_\" + chatId, \"USER1\");\n\n  const interaction = makeInteractionBase(chatId, interactionId, \"command\", text);\n  interaction.result = \"accepted\";\n\n  msg.payload = {\n    chatId,\n    type: \"message\",\n    content: \"안녕하세요! AGV 서비스 봇 현성이입니다.\\n무엇을 도와드릴까요?\",\n    options: {\n      reply_markup: {\n        keyboard: [\n          [\"☕ 물 가져와줘\", \"🥤 컵 가져가줘\"],\n          [\"🧹 환경 정리해줘\"],\n          [\"📍 지금 상태 알려줘\", \"📊 리포트 & 대시보드 열기\"]\n        ],\n        resize_keyboard: true,\n        one_time_keyboard: false\n      }\n    }\n  };\n\n  return [msg, null, null, makeFsMsg(interaction)];\n}\n\n// -------------------- 3) button --------------------\nif (BUTTONS.has(text)) {\n  const interactionId = makeInteractionId(chatId, \"button\");\n  msg._interactionId = interactionId;\n\n  const interaction = makeInteractionBase(chatId, interactionId, \"button\", text);\n\n  // 기본 타겟(지금은 USER1 고정, 나중에 default_area로 바꿔도 됨)\n  const area = \"USER1\";\n\n  // 버튼별 처리\n  if (text === \"☕ 물 가져와줘\") {\n    interaction.parsed = { type: \"deliver_water\", target_area: area, confidence: 1.0 };\n    interaction.result = \"accepted\";\n\n    const mqttMsg = makeMqtt(chatId, text, interactionId, \"cmd/water/request\", \"deliver_water\", area, \"button\");\n\n    msg.payload = {\n      chatId, type: \"message\",\n      content: \"물 배달 요청을 접수했어요 💧\\n금방 갖다드릴게요!\",\n      options: {}\n    };\n\n    return [msg, mqttMsg, null, makeFsMsg(interaction)];\n  }\n\n  if (text === \"🥤 컵 가져가줘\") {\n    interaction.parsed = { type: \"collect_cup\", target_area: area, confidence: 1.0 };\n    interaction.result = \"accepted\";\n\n    const mqttMsg = makeMqtt(chatId, text, interactionId, \"cmd/cup/request\", \"collect_cup\", area, \"button\");\n\n    msg.payload = {\n      chatId, type: \"message\",\n      content: \"컵 회수 요청을 접수했어요 🥤\\n바로 처리할게요!\",\n      options: {}\n    };\n\n    return [msg, mqttMsg, null, makeFsMsg(interaction)];\n  }\n\n  if (text === \"🧹 환경 정리해줘\") {\n    // 내부 type은 기존 유지(collect_laundry)\n    interaction.parsed = { type: \"collect_laundry\", target_area: area, confidence: 1.0 };\n    interaction.result = \"accepted\";\n\n    const mqttMsg = makeMqtt(chatId, text, interactionId, \"cmd/laundry/request\", \"collect_laundry\", area, \"button\");\n\n    msg.payload = {\n      chatId, type: \"message\",\n      content: \"환경 정리 요청을 접수했어요 🧹\\n주변을 깔끔하게 정리할게요!\",\n      options: {}\n    };\n\n    return [msg, mqttMsg, null, makeFsMsg(interaction)];\n  }\n\n  if (text === \"📍 지금 상태 알려줘\") {\n    interaction.parsed = { type: \"show_status\", target_area: null, confidence: 1.0 };\n    interaction.result = \"accepted\";\n\n    const robots = global.get(\"robots\") || {};\n    const taskQueue = global.get(\"taskQueue\") || [];\n    const r = robots[\"agv1\"];\n\n    if (!r) {\n      msg.payload = {\n        chatId,\n        type: \"message\",\n        content: \"📍 아직 AGV 상태를 못 받았어요.\\n(로봇 status 수신 확인 필요)\",\n        options: {}\n      };\n      return [msg, null, null, makeFsMsg(interaction)];\n    }\n\n    const AREA_LABEL = { BASE: \"베이스\", DOCK: \"도킹\", USER1: \"사용자 구역 1\", USER2: \"사용자 구역 2\" };\n    const TASK_LABEL = { deliver_water: \"☕ 물 배달\", collect_cup: \"🥤 컵 회수\", collect_laundry: \"🧹 환경 정리\" };\n\n    function areaName(a) { return AREA_LABEL[a] || a || \"—\"; }\n\n    const state = (r.state || \"unknown\").toLowerCase();\n    const prettyState =\n      (r.error_code) ? \"오류 ❗\" :\n        (state === \"running\") ? \"이동 중 🚚\" :\n          (state === \"idle\") ? \"대기 중 ✅\" :\n            (state === \"charging\") ? \"충전 중 🔌\" : state;\n\n    // 현재 task 찾기: robot.task_id 우선\n    let t = null;\n    if (r.task_id) t = taskQueue.find(x => x.task_id === r.task_id) || null;\n    if (!t) t = taskQueue.find(x => x.assigned_robot === \"agv1\" && x.status === \"running\") || null;\n\n    const lines = [];\n    lines.push(`📍 AGV 상태: ${prettyState}`);\n    if (r.battery != null) lines.push(`🔋 배터리: ${r.battery}%`);\n    if (r.area) lines.push(`📌 위치: ${areaName(r.area)}`);\n    if (r.error_code) lines.push(`⚠️ 원인: ${r.error_code}`);\n\n    if (!t) {\n      lines.push(\"\");\n      lines.push(\"🧾 진행 중 작업: 없음\");\n    } else {\n      const label = TASK_LABEL[t.type] || t.type || \"작업\";\n      const target = areaName(t.target_area);\n\n      // 남은시간 계산 (버튼 누를 때마다 20→15처럼 감소)\n      const expectedMs = Number(t.expected_duration_ms || 0);\n      const startedAt = Number(t.started_at || t.created_at || 0);\n      let remainSec = null;\n\n      if (expectedMs > 0 && startedAt > 0 && (state === \"running\" || t.status === \"running\")) {\n        const elapsedMs = Date.now() - startedAt;\n        const remainMs = Math.max(0, expectedMs - elapsedMs);\n        remainSec = Math.ceil(remainMs / 1000);\n      } else if (expectedMs > 0) {\n        remainSec = Math.ceil(expectedMs / 1000); // 아직 running 전이면 \"예상\"만 표시\n      }\n\n      lines.push(\"\");\n      lines.push(`🧾 진행 중 작업: ${label} → ${target}`);\n      if (remainSec != null) lines.push(`⏳ 예상 남은 시간: 약 ${remainSec}초`);\n    }\n\n    msg.payload = {\n      chatId,\n      type: \"message\",\n      content: lines.join(\"\\n\"),\n      options: {}\n    };\n\n    return [msg, null, null, makeFsMsg(interaction)];\n  }\n\n\n  if (text === \"📊 리포트 & 대시보드 열기\") {\n    interaction.parsed = { type: \"open_dashboard\", target_area: null, confidence: 1.0 };\n    interaction.result = \"accepted\";\n\n    msg.payload = {\n      chatId,\n      type: \"message\",\n      content: \"📊 리포트 & 대시보드를 열어드릴게요 🙂\",\n      options: {\n        reply_markup: {\n          inline_keyboard: [[\n            { text: \"열기\", web_app: { url: WEBAPP_URL } }\n          ]]\n        }\n      }\n    };\n\n    return [msg, null, null, makeFsMsg(interaction)];\n  }\n}\n\n// -------------------- 4) 그 외 = text → LLM --------------------\n{\n  const interactionId = makeInteractionId(chatId, \"text\");\n  msg._interactionId = interactionId;\n\n  const interaction = makeInteractionBase(chatId, interactionId, \"text\", text);\n  interaction.result = \"pending\";\n\n  msg.payload = {\n    chatId,\n    type: \"message\",\n    content: \"요청을 확인하고 있어요 🤖\\n잠시만 기다려주세요.\",\n    options: {}\n  };\n\n  const llmReq = {\n    headers: {\n      \"Content-Type\": \"application/json\",\n      \"Authorization\": `Bearer ${global.get(\"GMS_KEY\")}`\n    },\n    payload: {\n      model: \"gpt-4.1-nano\",\n      temperature: 0.2,\n      max_tokens: 200,\n      messages: [\n        {\n          role: \"system\",\n          content:\n            \"너는 AGV 사용자 앱의 명령 파서다. 반드시 JSON만 출력해.\\n\" +\n            \"허용 type: deliver_water, collect_cup, collect_laundry\\n\" +\n            \"허용 target_area: USER1, USER2, DOCK, BASE\\n\" +\n            \"사용자 표현 '환경 정리/바닥 정리/정리해줘' 는 collect_laundry로 매핑해.\\n\" +\n            '형식: {\"type\":\"...\",\"target_area\":\"...\",\"confidence\":0.0}\\n' +\n            \"추론 설명 금지. JSON 외 텍스트 금지.\"\n        },\n        { role: \"user\", content: text }\n      ]\n    },\n    _tg: { chatId, raw: text },\n    _interactionId: interactionId\n  };\n\n  // out1: tg reply, out3: llm, out4: fs\n  return [msg, null, llmReq, makeFsMsg(interaction)];\n}\n",
+        "outputs": 5,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 680,
+        "y": 480,
+        "wires": [
+            [
+                "d1e13ead5e796c2d"
+            ],
+            [
+                "6b5f1a99de2569f0"
+            ],
+            [
+                "54431a46252d1602"
+            ],
+            [
+                "350dfce793e04058"
+            ],
+            [
+                "f65016bb2f2505ba"
+            ]
+        ]
+    },
+    {
+        "id": "6b5f1a99de2569f0",
+        "type": "mqtt out",
+        "z": "49f8711fc297a8c1",
+        "name": "",
+        "topic": "",
+        "qos": "",
+        "retain": "",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "3c16a07776b27396",
+        "x": 1130,
+        "y": 320,
+        "wires": []
+    },
+    {
+        "id": "bea82cdd7f9e1fa3",
+        "type": "mqtt in",
+        "z": "49f8711fc297a8c1",
+        "name": "",
+        "topic": "cmd/+/request",
+        "qos": "2",
+        "datatype": "utf8",
+        "broker": "3c16a07776b27396",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 350,
+        "y": 1120,
+        "wires": [
+            [
+                "e0253ffdf7c81394",
+                "084632d493b02014"
+            ]
+        ]
+    },
+    {
+        "id": "e0253ffdf7c81394",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "function 2",
+        "func": "function pad(n, w=2){ return String(n).padStart(w,'0'); }\n\n// KST 기준 텍스트 타임스탬프 생성\nfunction tsKST() {\n  const k = new Date(Date.now() + 9*60*60*1000); // UTC+9\n  const y = k.getUTCFullYear();\n  const mo = pad(k.getUTCMonth()+1);\n  const d = pad(k.getUTCDate());\n  const hh = pad(k.getUTCHours());\n  const mm = pad(k.getUTCMinutes());\n  const ss = pad(k.getUTCSeconds());\n  const ms = pad(k.getUTCMilliseconds(), 3);\n  return `${y}${mo}${d}_${hh}${mm}${ss}_${ms}`; // 20251216_000305_123\n}\n\nlet data = {};\ntry {\n    data = JSON.parse(msg.payload || '{}');\n} catch (e) {\n    node.error('Invalid JSON payload in cmd request', msg);\n    return null;\n}\n\n// ✅ interaction_id 추출 (telegram/llm에서 meta로 넣어준 값)\nconst interactionId = data?.meta?.interaction_id || null;\n\n// 글로벌 taskQueue 가져오기 (없으면 빈 배열)\nlet queue = global.get('taskQueue') || [];\n\n// task_id 생성\nconst ts = tsKST();\nconst area = (data.target_area || 'USER1').toUpperCase();\nconst typeForId = (data.type || 'unknown').toLowerCase(); // 혹은 taskType 계산 이후 사용해도 됨\n\nconst taskId = interactionId;   // ✅ task_id = interaction_id\n\n// type 결정\nconst taskType = data.type || (() => {\n    if (msg.topic.startsWith('cmd/water/')) \n        return 'deliver_water';\n    if (msg.topic.startsWith('cmd/cup/')) \n        return 'collect_cup';\n    if (msg.topic.startsWith('cmd/laundry/')) \n        return 'collect_laundry';\n    return 'unknown';\n})();\n\nfunction normTargetArea(raw) {\n  const s = String(raw || \"\").toUpperCase();\n\n  const map = {\n    // 옛 이름 호환\n    USER1: \"RES_A\",\n    USER2: \"RES_B\",\n    USER3: \"RES_C\",\n    BASE:  \"CHARGE\",\n    HOME:  \"CHARGE\",\n    DOCK:  \"CHARGE\",\n  };\n\n  if (map[s]) return map[s];\n\n  // 이미 새 이름이면 그대로\n  if ([\"CHARGE\",\"WATER\",\"DROP\",\"RES_A\",\"RES_B\",\"RES_C\"].includes(s)) return s;\n\n  // 디폴트: 가운데 유저공간\n  return \"RES_B\";\n}\n\n// Task 객체 (v0.1)\nconst task = {\n    task_id: taskId,\n    type: taskType,\n    target_area: normTargetArea(data.target_area || \"RES_B\"),\n    user_id: data.user_id || null,\n\n    // ✅ 연결 키\n    interaction_id: interactionId,\n\n    status: 'pending',\n    created_at: Date.now(),\n};\n\n// ---- 예상 소요시간(ms) : EMA가 있으면 그걸 쓰고, 없으면 기본값 ----\nconst taskStats = global.get(\"taskStats\") || {};        // { deliver_water: { ema_ms, n }, ... }\nconst baseMsMap = { deliver_water: 20000, collect_cup: 15000, collect_laundry: 25000, unknown: 20000 };\n\nconst stat = taskStats[taskType];\nconst expectedMs = (stat && stat.ema_ms) ? Math.round(stat.ema_ms) : (baseMsMap[taskType] || 20000);\n\ntask.expected_duration_ms = expectedMs;\ntask.expected_duration_s = Math.ceil(expectedMs / 1000);\ntask.eta_basis = (stat && stat.ema_ms) ? \"ema\" : \"default\";\n\n// 큐에 push\nqueue.push(task);\nglobal.set('taskQueue', queue);\n\n// 디버그 로그\nnode.warn({ action: 'TASK_CREATED', task });\n\n// ✅ interaction 문서에 task_id backfill (업서트)\nconst db = global.get(\"db\");\n\n// ✅ (추가) Firestore tasks 문서도 생성/업서트\nif (db && taskId) {\n  db.collection(\"tasks\").doc(taskId).set({\n    ...task,\n    // 혹시 payload는 JSON stringify 했을 수도 있으니 안전하게 숫자 보장\n    expected_duration_ms: Number(task.expected_duration_ms || expectedMs),\n    created_at: task.created_at || Date.now(),\n  }, { merge: true })\n  .catch(err => node.error(\"[tasks create] \" + err));\n}\n\nif (db && interactionId) {\n    db.collection(\"interactions\").doc(interactionId).set({\n        task_id: taskId,\n        linked_at: Date.now()\n    }, { merge: true })\n    .then(() => node.warn(`FS interaction linked: ${interactionId} -> ${taskId}`))\n    .catch(err => node.error(err));\n}\n\n// 아래로 넘겨줄 메시지 세팅\nmsg.task = task;\nmsg.payload = JSON.stringify(task);\n\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 780,
+        "y": 1120,
+        "wires": [
+            [
+                "2ccacb1608c5ba74"
+            ]
+        ]
+    },
+    {
+        "id": "8fa070ba704430fc",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "function 3",
+        "func": "// // // v0.1: 들어온 task를 무조건 agv1에 바로 할당해서 보냄\n\n// // let task = msg.task;\n// // if (!task) {\n// //     node.warn('No task found in msg');\n// //     return null;\n// // }\n\n// // // 상태 변경\n// // task.status = 'running';\n// // task.assigned_robot = 'agv1';\n// // task.started_at = Date.now();\n\n// // // 글로벌 큐에도 반영\n// // let queue = global.get('taskQueue') || [];\n// // for (let i = 0; i < queue.length; i++) {\n// //     if (queue[i].task_id === task.task_id) {\n// //         queue[i] = task;\n// //         break;\n// //     }\n// // }\n// // global.set('taskQueue', queue);\n\n// // // 디버그용\n// // node.warn({ action: 'TASK_ASSIGNED', task: task });\n\n// // // 이 msg를 mqtt out으로 보낼 준비\n// // msg.topic = 'robot/agv1/task';\n// // msg.payload = JSON.stringify(task);\n\n// // return msg;\n\n\n// // function3: Dispatcher/Scheduler v1\n// // 호출 타이밍:\n// //  1) 새 task 생성 직후(function2 -> function3)\n// //  2) 로봇 상태 업데이트 후(updateStatus -> function3)\n// // 동작:\n// //  - 로봇이 running이면 아무 것도 안 함\n// //  - idle이면 queue에서 다음 pending 1개 꺼내서 running으로 전환 후 publish\n\n// const robotId = \"agv1\";\n\n// // 0) 글로벌 상태 읽기\n// let robots = global.get(\"robots\") || {};\n// let queue = global.get(\"taskQueue\") || [];\n\n// // robots 기본값 보정\n// if (!robots[robotId]) {\n//     robots[robotId] = {\n//         robot_id: robotId,\n//         state: \"idle\",\n//         task_id: null,\n//         updated_at: Date.now()\n//     };\n// }\n\n// // 1) 로봇이 바쁘면 패스 (이게 “바쁠 때는 할당 안 됨”의 정체)\n// if (robots[robotId].state === \"running\") {\n//     return null;\n// }\n\n// // 2) queue에 이미 running이 있으면(상태 꼬임 방지) 패스\n// const hasRunning = queue.some(t => t.assigned_robot === robotId && t.status === \"running\");\n// if (hasRunning) return null;\n\n// // 3) 다음 task 선택 (FIFO + 필요하면 type 우선순위)\n// // “물 먼저” 보장을 원하면 PRIORITY를 사용\n// const PRIORITY = { deliver_water: 10, collect_cup: 20, collect_laundry: 30, unknown: 99 };\n\n// let candidates = queue\n//     .map((t, idx) => ({ t, idx }))\n//     .filter(x => (x.t.status === \"pending\" || x.t.status === \"queued\") && !x.t.assigned_robot);\n\n// if (candidates.length === 0) return null;\n\n// candidates.sort((a, b) => {\n//     const pa = PRIORITY[a.t.type] ?? 99;\n//     const pb = PRIORITY[b.t.type] ?? 99;\n//     if (pa !== pb) return pa - pb;\n//     return (a.t.created_at || 0) - (b.t.created_at || 0); // FIFO\n// });\n\n// let { t: task, idx } = candidates[0];\n\n// // 4) running 전환 + queue 반영\n// task.status = \"running\";\n// task.assigned_robot = robotId;\n// task.started_at = Date.now();\n\n// queue[idx] = task;\n// global.set(\"taskQueue\", queue);\n\n// // 5) robots 상태도 running으로 선반영(레이스 방지)\n// robots[robotId] = {\n//     ...robots[robotId],\n//     state: \"running\",\n//     task_id: task.task_id,\n//     updated_at: Date.now()\n// };\n// global.set(\"robots\", robots);\n\n// // 6) 다음 노드들(FS update task, mqtt out)로 넘길 msg 구성\n// msg.task = task;\n// msg.topic = `robot/${robotId}/task`;\n// msg.payload = JSON.stringify(task);\n\n// node.warn({ action: \"TASK_DISPATCHED\", task_id: task.task_id, type: task.type });\n\n// return msg;\n\n\nconst robotId = \"agv1\";\nconst now = Date.now();\n\n// 0) 글로벌 상태 읽기\nlet robots = global.get(\"robots\") || {};\nlet queue = global.get(\"taskQueue\") || [];\n\n// ✅ NEW) (중요) msg.task / msg.payload로 들어온 task를 global.taskQueue에 자동으로 넣어줌\nlet incomingTask = msg.task || null;\nif (!incomingTask && typeof msg.payload === \"string\") {\n  try { incomingTask = JSON.parse(msg.payload); } catch {}\n}\nif (incomingTask && incomingTask.task_id) {\n  const exists = queue.some(t => t.task_id === incomingTask.task_id);\n  if (!exists) {\n    queue.push(incomingTask);\n    global.set(\"taskQueue\", queue);\n    node.warn({ action: \"ENQUEUE_TASK\", task_id: incomingTask.task_id, status: incomingTask.status, qlen: queue.length });\n  }\n}\n\n// robots 기본값 보정\nif (!robots[robotId]) {\n  robots[robotId] = {\n    robot_id: robotId,\n    state: \"idle\",\n    task_id: null,\n    updated_at: now\n  };\n}\n\n// ✅ NEW) 로봇 running stuck 방지: 마지막 업데이트가 너무 오래됐으면 idle로 리셋(안 그러면 영원히 dispatch 안 됨)\nconst STALE_MS = 15000;\nif (robots[robotId].state === \"running\") {\n  const upd = Number(robots[robotId].updated_at || 0);\n  if (upd && (now - upd > STALE_MS)) {\n    node.warn({ action: \"ROBOT_STALE_RESET\", robot_state: robots[robotId].state, task_id: robots[robotId].task_id, updated_at: upd });\n    robots[robotId].state = \"idle\";\n    robots[robotId].task_id = null;\n    robots[robotId].updated_at = now;\n    global.set(\"robots\", robots);\n  }\n}\n\n// 1) 로봇이 바쁘면 패스\nif (robots[robotId].state === \"running\") {\n  node.warn({ action: \"DISPATCH_SKIP\", reason: \"robot_running\", robot: robots[robotId] });\n  return null;\n}\n\n// 2) queue에 이미 running이 있으면 패스\nconst hasRunning = queue.some(t => t.assigned_robot === robotId && t.status === \"running\");\nif (hasRunning) {\n  const rt = queue.find(t => t.assigned_robot === robotId && t.status === \"running\");\n  node.warn({ action: \"DISPATCH_SKIP\", reason: \"queue_has_running\", running_task: rt?.task_id, qlen: queue.length });\n  return null;\n}\n\n// 3) 후보 선택\nconst PRIORITY = { deliver_water: 10, collect_cup: 20, collect_laundry: 30, unknown: 99 };\n\nlet candidates = queue\n  .map((t, idx) => ({ t, idx }))\n  .filter(x => (x.t.status === \"pending\" || x.t.status === \"queued\") && !x.t.assigned_robot);\n\nif (candidates.length === 0) {\n  node.warn({ action: \"DISPATCH_SKIP\", reason: \"no_candidates\", qlen: queue.length, sample: queue.slice(-3) });\n  return null;\n}\n\ncandidates.sort((a, b) => {\n  const pa = PRIORITY[a.t.type] ?? 99;\n  const pb = PRIORITY[b.t.type] ?? 99;\n  if (pa !== pb) return pa - pb;\n  return (a.t.created_at || 0) - (b.t.created_at || 0);\n});\n\nlet { t: task, idx } = candidates[0];\n\n// 4) running 전환 + queue 반영\ntask.status = \"running\";\ntask.assigned_robot = robotId;\ntask.started_at = now;\n\nqueue[idx] = task;\nglobal.set(\"taskQueue\", queue);\n\n// 5) robots 상태도 running으로 선반영\nrobots[robotId] = {\n  ...robots[robotId],\n  state: \"running\",\n  task_id: task.task_id,\n  updated_at: now\n};\nglobal.set(\"robots\", robots);\n\n// 6) mqtt로 보낼 msg 구성\nmsg.task = task;\nmsg.topic = `robot/${robotId}/task`;\nmsg.payload = JSON.stringify(task);\n\nnode.warn({ action: \"TASK_DISPATCHED\", task_id: task.task_id, type: task.type, target_area: task.target_area });\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1400,
+        "y": 1120,
+        "wires": [
+            [
+                "58d8d616da6872e1",
+                "fc7132a95c44fe84"
+            ]
+        ]
+    },
+    {
+        "id": "c02ac5399c925f84",
+        "type": "mqtt out",
+        "z": "49f8711fc297a8c1",
+        "name": "",
+        "topic": "",
+        "qos": "",
+        "retain": "",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "3c16a07776b27396",
+        "x": 2090,
+        "y": 1120,
+        "wires": []
+    },
+    {
+        "id": "084632d493b02014",
+        "type": "debug",
+        "z": "49f8711fc297a8c1",
+        "name": "debug 1",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 520,
+        "y": 1140,
+        "wires": []
+    },
+    {
+        "id": "a8cdfef7f11748d6",
+        "type": "mqtt in",
+        "z": "49f8711fc297a8c1",
+        "name": "robot status",
+        "topic": "robot/+/status",
+        "qos": "2",
+        "datatype": "utf8",
+        "broker": "3c16a07776b27396",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 350,
+        "y": 1300,
+        "wires": [
+            [
+                "95ebc22a961575da"
+            ]
+        ]
+    },
+    {
+        "id": "95ebc22a961575da",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "function(updateStatus)",
+        "func": "// robot/+/status 로부터 들어오는 msg를 처리하는 함수\n\n// 1) payload JSON 파싱\nlet status;\ntry {\n    status = JSON.parse(msg.payload || '{}');\n} catch (e) {\n    node.error('Invalid JSON in robot status', msg);\n    return null;\n}\n\n// 2) 토픽에서 robot_id 추출: robot/agv1/status\nconst parts = msg.topic.split('/');\nconst robotIdFromTopic = parts[1] || null;\nconst robotId = status.robot_id || robotIdFromTopic || 'unknown';\n\n// 3) robots 상태 갱신 (global.robots)\nlet robots = global.get('robots') || {};\nconst now = Date.now();\nrobots[robotId] = {\n    // 기존 값 유지(추가 필드 안 날리기)\n    ...(robots[robotId] || {}),\n\n    // 표준 필드\n    robot_id: robotId,\n    state: status.state || 'unknown',\n    task_id: status.task_id || null,\n    battery: status.battery ?? null,\n    area: status.area || null,\n    error_code: status.error_code || null,\n\n    // 디지털 트윈 핵심 필드 (추가)\n    pose: status.pose || (robots[robotId]?.pose ?? null),\n    target_area: status.target_area || (robots[robotId]?.target_area ?? null),\n\n    updated_at: status.updated_at || now\n};\nglobal.set('robots', robots);\n\n// ----------------------\n// EMA stats helpers\n// ----------------------\nlet taskStats = global.get(\"taskStats\") || {};  // { deliver_water: { ema_ms, n, updated_at }, ... }\nconst EMA_ALPHA = 0.3;\n\nfunction emaUpdate(key, sampleMs) {\n    const prev = taskStats[key]?.ema_ms;\n    const next = (prev == null) ? sampleMs : (EMA_ALPHA * sampleMs + (1 - EMA_ALPHA) * prev);\n    taskStats[key] = {\n        ema_ms: next,\n        n: (taskStats[key]?.n || 0) + 1,\n        updated_at: Date.now()\n    };\n}\n\n// 4) taskQueue/events 반영 (task_id 있을 때만)\nlet taskQueue = global.get('taskQueue') || [];\nlet events = global.get('events') || [];\n\nif (status.task_id) {\n    const taskId = status.task_id;\n\n    for (let i = 0; i < taskQueue.length; i++) {\n        if (taskQueue[i].task_id === taskId) {\n\n            if (status.state === 'done' || status.state === 'idle') {\n                taskQueue[i].status = 'done';\n                taskQueue[i].finished_at = Date.now();\n\n                // ✅ 추가: 실제 걸린 시간 계산 + EMA 업데이트\n                const started = taskQueue[i].started_at || taskQueue[i].created_at || taskQueue[i].finished_at;\n                const actualMs = Math.max(0, taskQueue[i].finished_at - started);\n                taskQueue[i].actual_duration_ms = actualMs;\n\n                const key = taskQueue[i].type || \"unknown\"; // 더 세분화 원하면 `${type}|${target_area}`\n                emaUpdate(key, actualMs);\n                global.set(\"taskStats\", taskStats);\n            } else if (status.state === 'running') {\n                taskQueue[i].status = 'running';\n                if (!taskQueue[i].started_at) taskQueue[i].started_at = Date.now();\n            } else if (status.state === 'error') {\n                taskQueue[i].status = 'failed';\n                taskQueue[i].finished_at = Date.now();\n                taskQueue[i].error_code = status.error_code || null;\n\n                // ✅ 추가: 실제 걸린 시간 계산 + EMA 업데이트\n                const started = taskQueue[i].started_at || taskQueue[i].created_at || taskQueue[i].finished_at;\n                const actualMs = Math.max(0, taskQueue[i].finished_at - started);\n                taskQueue[i].actual_duration_ms = actualMs;\n\n                const key = taskQueue[i].type || \"unknown\";\n                emaUpdate(key, actualMs);\n                global.set(\"taskStats\", taskStats);\n            }\n\n            taskQueue[i].assigned_robot = robotId;\n            break;\n        }\n    }\n    global.set('taskQueue', taskQueue);\n\n    events.push({\n        ts: Date.now(),\n        type: 'task_status_update',\n        robot_id: robotId,\n        task_id: taskId,\n        state: status.state,\n        area: status.area || null,\n        target_area: status.target_area || null,\n        pose: status.pose || null,\n        error_code: status.error_code || null\n    });\n\n    if (events.length > 200) events = events.slice(events.length - 200);\n    global.set('events', events);\n}\n\n// 5) 디버그 payload 세팅\nmsg.payload = {\n    last_status: status,\n    robots: robots\n};\n\n// ----------------------\n// Firestore write (추가)\n// ----------------------\nconst db = global.get(\"db\");\nif (db) {\n    // robots/{robotId}\n    db.collection(\"robots\").doc(robotId).set(robots[robotId], { merge: true })\n        .catch(err => node.error(\"[robots write] \" + err));\n\n    // tasks/{task_id} (있을 때만)\n    if (status.task_id) {\n        const mappedStatus =\n            (status.state === \"error\") ? \"failed\" :\n            (status.state === \"done\" || status.state === \"idle\") ? \"done\" :\n            (status.state === \"running\") ? \"running\" : \"unknown\";\n\n        const taskPatch = {\n            status: mappedStatus,\n            assigned_robot: robotId,\n            error_code: status.error_code || null,\n        };\n\n        const tq = global.get(\"taskQueue\") || [];\n        const tt = tq.find(x => x.task_id === status.task_id);\n        if (tt?.actual_duration_ms != null) taskPatch.actual_duration_ms = tt.actual_duration_ms;\n        if (tt?.expected_duration_ms != null) taskPatch.expected_duration_ms = tt.expected_duration_ms;\n\n        if (status.state === \"done\" || status.state === \"idle\" || status.state === \"error\") {\n            taskPatch.finished_at = Date.now();\n        }\n\n        db.collection(\"tasks\").doc(status.task_id).set(taskPatch, { merge: true })\n            .catch(err => node.error(\"[tasks write] \" + err));\n    }\n\n    // events add\n    db.collection(\"events\").add({\n        ts: Date.now(),\n        type: \"task_status_update\",\n        robot_id: robotId,\n        task_id: status.task_id || null,\n        state: status.state || null,\n        area: status.area || null,\n        target_area: status.target_area || null,\n        pose: status.pose || null,\n        error_code: status.error_code || null\n    }).catch(err => node.error(\"[events add] \" + err));\n}\n\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 660,
+        "y": 1300,
+        "wires": [
+            [
+                "0ea75d0a1dd47579",
+                "8fa070ba704430fc"
+            ]
+        ]
+    },
+    {
+        "id": "0ea75d0a1dd47579",
+        "type": "debug",
+        "z": "49f8711fc297a8c1",
+        "name": "debug 2",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 920,
+        "y": 1300,
+        "wires": []
+    },
+    {
+        "id": "b9b40ef75eda6086",
+        "type": "inject",
+        "z": "49f8711fc297a8c1",
+        "name": "refresh robots",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "1",
+        "crontab": "",
+        "once": true,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 400,
+        "y": 2880,
+        "wires": [
+            [
+                "62da11a590d356e1"
+            ]
+        ]
+    },
+    {
+        "id": "62da11a590d356e1",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "getRobots",
+        "func": "const robots = global.get('robots') || {};\nconst arr = [];\n\nfor (const id in robots) {\n    const r = robots[id];\n    // updated_at 누락 방어\n    if (!r.updated_at) r.updated_at = Date.now();\n    arr.push(r);\n}\n\nmsg.robots = arr;\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 710,
+        "y": 2880,
+        "wires": [
+            [
+                "b1495853d26db37c"
+            ]
+        ]
+    },
+    {
+        "id": "c8bbc855845ed80c",
+        "type": "inject",
+        "z": "49f8711fc297a8c1",
+        "name": "refresh tasks",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "1",
+        "crontab": "",
+        "once": true,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 400,
+        "y": 2940,
+        "wires": [
+            [
+                "49c2e81ae9744bc4"
+            ]
+        ]
+    },
+    {
+        "id": "49c2e81ae9744bc4",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "getTasks",
+        "func": "let tasks = global.get('taskQueue') || [];\n\n// 최근 생성된 순서대로 보고 싶으면 정렬\ntasks = tasks.slice().sort((a, b) => (b.created_at || 0) - (a.created_at || 0));\n\nmsg.tasks = tasks;\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 700,
+        "y": 2940,
+        "wires": [
+            [
+                "c915a198b0c6cae3"
+            ]
+        ]
+    },
+    {
+        "id": "6867664da4b8f9fd",
+        "type": "inject",
+        "z": "49f8711fc297a8c1",
+        "name": "refresh events",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "1",
+        "crontab": "",
+        "once": true,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 400,
+        "y": 3000,
+        "wires": [
+            [
+                "b6c7d07a0458179a"
+            ]
+        ]
+    },
+    {
+        "id": "b6c7d07a0458179a",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "getEvents",
+        "func": "let events = global.get('events') || [];\n\n// 최신 이벤트가 위에 보이도록 역순 정렬\nevents = events.slice().sort((a, b) => (b.ts || 0) - (a.ts || 0));\n\nmsg.events = events;\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 700,
+        "y": 3000,
+        "wires": [
+            [
+                "5b2975efe1ee8e3a"
+            ]
+        ]
+    },
+    {
+        "id": "b1495853d26db37c",
+        "type": "ui_template",
+        "z": "49f8711fc297a8c1",
+        "group": "e6e1b7942a2b8330",
+        "name": "Robots cards",
+        "order": 0,
+        "width": 0,
+        "height": 0,
+        "format": "<div class=\"robots-wrapper\">\n  <div ng-repeat=\"r in msg.robots\" \n       class=\"robot-card\" \n       ng-class=\"(r.state || 'unknown').toLowerCase()\">\n       \n    <div class=\"robot-header\">\n      <span class=\"robot-id\">{{r.robot_id}}</span>\n      <span class=\"state-pill\" \n            ng-class=\"(r.state || 'unknown').toLowerCase()\">\n        {{(r.state || 'unknown') | uppercase}}\n      </span>\n    </div>\n\n    <div class=\"robot-main\">\n      <div class=\"battery\">\n        🔋 {{r.battery !== null && r.battery !== undefined ? (r.battery + '%') : '-'}}\n      </div>\n      <div class=\"area\">\n        📍 {{r.area || '-'}}\n      </div>\n      <div class=\"task\">\n        🧾 {{r.task_id || '-'}}\n      </div>\n      <div class=\"error\" ng-if=\"r.error_code\">\n        ⚠ ERROR: {{r.error_code}}\n      </div>\n    </div>\n\n    <div class=\"robot-footer\">\n      <span class=\"updated-label\">UPDATED</span>\n      <span class=\"updated-at\">\n        {{ r.updated_at | date:'HH:mm:ss' }}\n      </span>\n    </div>\n  </div>\n\n  <div ng-if=\"!msg.robots || msg.robots.length === 0\" class=\"robot-empty\">\n    No robot data yet.\n  </div>\n</div>\n\n<style>\n  .robots-wrapper {\n    display:flex;\n    flex-wrap:wrap;\n    gap:16px;\n    padding-top:4px;\n  }\n  .robot-card {\n    width: 220px;\n    background: radial-gradient(circle at top left, #0f172a, #020617);\n    border-radius:16px;\n    padding:12px 14px;\n    box-shadow:0 0 18px rgba(15,23,42,0.9);\n    border:1px solid rgba(148,163,184,0.35);\n    color:#E5E7EB;\n    display:flex;\n    flex-direction:column;\n    justify-content:space-between;\n  }\n  .robot-header {\n    display:flex;\n    justify-content:space-between;\n    align-items:center;\n    margin-bottom:8px;\n  }\n  .robot-id {\n    font-weight:700;\n    font-size:16px;\n    color:#F9FAFB;\n  }\n  .state-pill {\n    padding:2px 8px;\n    border-radius:999px;\n    font-size:10px;\n    font-weight:600;\n    letter-spacing:0.5px;\n    border:1px solid rgba(148,163,184,0.5);\n  }\n  .state-pill.idle {\n    background:rgba(148,163,184,0.15);\n    border-color:#9CA3AF;\n    color:#E5E7EB;\n  }\n  .state-pill.running {\n    background:rgba(34,197,94,0.15);\n    border-color:#22C55E;\n    color:#BBF7D0;\n  }\n  .state-pill.charging {\n    background:rgba(234,179,8,0.12);\n    border-color:#EAB308;\n    color:#FEF9C3;\n  }\n  .state-pill.error, .state-pill.failed, .state-pill.fault {\n    background:rgba(239,68,68,0.16);\n    border-color:#EF4444;\n    color:#FECACA;\n  }\n  .state-pill.unknown {\n    background:rgba(59,130,246,0.12);\n    border-color:#3B82F6;\n    color:#BFDBFE;\n  }\n\n  .robot-main {\n    font-size:13px;\n    line-height:1.4;\n    margin-top:4px;\n    margin-bottom:8px;\n  }\n  .robot-main > div {\n    margin:2px 0;\n  }\n  .robot-main .error {\n    color:#FCA5A5;\n    font-size:12px;\n  }\n\n  .robot-footer {\n    display:flex;\n    justify-content:space-between;\n    font-size:10px;\n    color:#9CA3AF;\n    border-top:1px dashed rgba(55,65,81,0.8);\n    padding-top:4px;\n    margin-top:4px;\n  }\n  .robot-empty {\n    font-size:12px;\n    color:#9CA3AF;\n    padding:10px;\n  }\n</style>\n",
+        "storeOutMessages": true,
+        "fwdInMessages": true,
+        "resendOnRefresh": true,
+        "templateScope": "local",
+        "className": "",
+        "x": 1030,
+        "y": 2880,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "4cc056840f379311",
+        "type": "inject",
+        "z": "49f8711fc297a8c1",
+        "name": "Summary",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "1",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 390,
+        "y": 2820,
+        "wires": [
+            [
+                "cc62e9eae576026f"
+            ]
+        ]
+    },
+    {
+        "id": "cc62e9eae576026f",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "Summary",
+        "func": "// robots 요약\nconst robots = global.get('robots') || {};\nconst taskQueue = global.get('taskQueue') || [];\n\nlet total = 0, idle = 0, running = 0, charging = 0, error = 0, others = 0;\n\nfor (const id in robots) {\n    total++;\n    const s = (robots[id].state || '').toLowerCase();\n    if (s === 'idle') idle++;\n    else if (s === 'running') running++;\n    else if (s === 'charging') charging++;\n    else if (s === 'error' || s === 'failed' || s === 'fault') error++;\n    else others++;\n}\n\nmsg.summary = { total, idle, running, charging, error, others };\n\n// tasks 요약\nlet tTotal = taskQueue.length;\nlet tPending = 0, tRunning = 0, tDone = 0, tFailed = 0;\n\nfor (const t of taskQueue) {\n    const s = (t.status || '').toLowerCase();\n    if (s === 'pending') tPending++;\n    else if (s === 'running') tRunning++;\n    else if (s === 'done') tDone++;\n    else if (s === 'failed') tFailed++;\n}\n\nmsg.taskSummary = {\n    total: tTotal,\n    pending: tPending,\n    running: tRunning,\n    done: tDone,\n    failed: tFailed\n};\n\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 700,
+        "y": 2820,
+        "wires": [
+            [
+                "74d6b228f443bd37"
+            ]
+        ]
+    },
+    {
+        "id": "74d6b228f443bd37",
+        "type": "ui_template",
+        "z": "49f8711fc297a8c1",
+        "group": "7e8e44e7110066b9",
+        "name": "",
+        "order": 0,
+        "width": 0,
+        "height": 0,
+        "format": "<div class=\"dash-summary\">\n  <div class=\"summary-card total\">\n    <div class=\"label\">ROBOTS</div>\n    <div class=\"value\">{{msg.summary.total || 0}}</div>\n  </div>\n  <div class=\"summary-card idle\">\n    <div class=\"label\">IDLE</div>\n    <div class=\"value\">{{msg.summary.idle || 0}}</div>\n  </div>\n  <div class=\"summary-card running\">\n    <div class=\"label\">RUNNING</div>\n    <div class=\"value\">{{msg.summary.running || 0}}</div>\n  </div>\n  <div class=\"summary-card charging\">\n    <div class=\"label\">CHARGING</div>\n    <div class=\"value\">{{msg.summary.charging || 0}}</div>\n  </div>\n  <div class=\"summary-card error\">\n    <div class=\"label\">ERROR/OTHER</div>\n    <div class=\"value\">\n      {{(msg.summary.error || 0) + (msg.summary.others || 0)}}\n    </div>\n  </div>\n</div>\n\n<div class=\"dash-summary\" style=\"margin-top:6px;\">\n  <div class=\"summary-card task-total\">\n    <div class=\"label\">TASKS</div>\n    <div class=\"value\">{{msg.taskSummary.total || 0}}</div>\n  </div>\n  <div class=\"summary-card task-pending\">\n    <div class=\"label\">PENDING</div>\n    <div class=\"value\">{{msg.taskSummary.pending || 0}}</div>\n  </div>\n  <div class=\"summary-card task-running\">\n    <div class=\"label\">RUNNING</div>\n    <div class=\"value\">{{msg.taskSummary.running || 0}}</div>\n  </div>\n  <div class=\"summary-card task-done\">\n    <div class=\"label\">DONE</div>\n    <div class=\"value\">{{msg.taskSummary.done || 0}}</div>\n  </div>\n  <div class=\"summary-card task-failed\">\n    <div class=\"label\">FAILED</div>\n    <div class=\"value\">{{msg.taskSummary.failed || 0}}</div>\n  </div>\n</div>\n\n<style>\n  .dash-summary {\n    display:flex;\n    flex-wrap:wrap;\n    gap:16px;\n    padding:4px 0 4px 0;\n  }\n  .summary-card {\n    flex:0 0 150px;\n    background:#020617;\n    border-radius:14px;\n    padding:10px 14px;\n    box-shadow:0 0 18px rgba(0,0,0,0.45);\n    border:1px solid rgba(148,163,184,0.25);\n  }\n  .summary-card .label {\n    font-size:11px;\n    letter-spacing:1px;\n    color:#9CA3AF;\n  }\n  .summary-card .value {\n    margin-top:4px;\n    font-size:22px;\n    font-weight:700;\n    color:#F9FAFB;\n  }\n\n  .summary-card.total      { border-left:3px solid #38BDF8; }\n  .summary-card.idle       { border-left:3px solid #9CA3AF; }\n  .summary-card.running    { border-left:3px solid #22C55E; }\n  .summary-card.charging   { border-left:3px solid #EAB308; }\n  .summary-card.error      { border-left:3px solid #EF4444; }\n\n  .summary-card.task-total   { border-left:3px solid #6366F1; }\n  .summary-card.task-pending { border-left:3px solid #9CA3AF; }\n  .summary-card.task-running { border-left:3px solid #22C55E; }\n  .summary-card.task-done    { border-left:3px solid #0EA5E9; }\n  .summary-card.task-failed  { border-left:3px solid #F97316; }\n</style>\n",
+        "storeOutMessages": true,
+        "fwdInMessages": true,
+        "resendOnRefresh": true,
+        "templateScope": "local",
+        "className": "",
+        "x": 1020,
+        "y": 2820,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "c915a198b0c6cae3",
+        "type": "ui_template",
+        "z": "49f8711fc297a8c1",
+        "group": "920df32220cd089d",
+        "name": "",
+        "order": 0,
+        "width": 0,
+        "height": 0,
+        "format": "<div class=\"tasks-wrapper\">\n  <table class=\"tasks-table\" ng-if=\"msg.tasks && msg.tasks.length\">\n    <thead>\n      <tr>\n        <th>Task ID</th>\n        <th>Type</th>\n        <th>Target</th>\n        <th>Status</th>\n        <th>Robot</th>\n        <th>Created</th>\n      </tr>\n    </thead>\n    <tbody>\n      <tr ng-repeat=\"t in msg.tasks\">\n        <td>{{t.task_id}}</td>\n        <td>{{t.type}}</td>\n        <td>{{t.target_area}}</td>\n        <td>\n          <span class=\"task-status\" ng-class=\"(t.status || 'unknown').toLowerCase()\">\n            {{(t.status || 'unknown') | uppercase}}\n          </span>\n        </td>\n        <td>{{t.assigned_robot || '-'}}</td>\n        <td>{{t.created_at | date:'MM-dd HH:mm:ss'}}</td>\n      </tr>\n    </tbody>\n  </table>\n\n  <div ng-if=\"!msg.tasks || !msg.tasks.length\" class=\"tasks-empty\">\n    No tasks yet.\n  </div>\n</div>\n\n<style>\n  .tasks-wrapper {\n    padding-top:4px;\n  }\n  .tasks-table {\n    width:100%;\n    border-collapse:collapse;\n    font-size:12px;\n    background:#020617;\n    border-radius:10px;\n    overflow:hidden;\n    box-shadow:0 0 18px rgba(15,23,42,0.7);\n  }\n  .tasks-table thead {\n    background:linear-gradient(to right,#0f172a,#020617);\n  }\n  .tasks-table th,\n  .tasks-table td {\n    padding:6px 8px;\n    text-align:left;\n    border-bottom:1px solid rgba(30,41,59,0.9);\n    color:#E5E7EB;\n  }\n  .tasks-table th {\n    font-weight:600;\n    font-size:11px;\n    color:#9CA3AF;\n  }\n  .tasks-table tbody tr:hover {\n    background:rgba(15,23,42,0.8);\n  }\n\n  .task-status {\n    padding:2px 6px;\n    border-radius:999px;\n    font-size:10px;\n    border:1px solid rgba(148,163,184,0.4);\n  }\n  .task-status.pending {\n    background:rgba(148,163,184,0.1);\n    border-color:#9CA3AF;\n  }\n  .task-status.running {\n    background:rgba(34,197,94,0.15);\n    border-color:#22C55E;\n    color:#BBF7D0;\n  }\n  .task-status.done {\n    background:rgba(59,130,246,0.18);\n    border-color:#3B82F6;\n    color:#DBEAFE;\n  }\n  .task-status.failed {\n    background:rgba(239,68,68,0.18);\n    border-color:#EF4444;\n    color:#FECACA;\n  }\n  .task-status.unknown {\n    background:rgba(107,114,128,0.18);\n    border-color:#6B7280;\n    color:#E5E7EB;\n  }\n\n  .tasks-empty {\n    font-size:12px;\n    color:#9CA3AF;\n    padding:8px;\n  }\n</style>\n",
+        "storeOutMessages": true,
+        "fwdInMessages": true,
+        "resendOnRefresh": true,
+        "templateScope": "local",
+        "className": "",
+        "x": 1020,
+        "y": 2940,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "5b2975efe1ee8e3a",
+        "type": "ui_template",
+        "z": "49f8711fc297a8c1",
+        "group": "ab2f507577ca5dbe",
+        "name": "",
+        "order": 0,
+        "width": 0,
+        "height": 0,
+        "format": "<div class=\"events-wrapper\">\n  <table class=\"events-table\" ng-if=\"msg.events && msg.events.length\">\n    <thead>\n      <tr>\n        <th>Time</th>\n        <th>Type</th>\n        <th>Robot</th>\n        <th>Task</th>\n        <th>State</th>\n        <th>Area</th>\n        <th>Error</th>\n      </tr>\n    </thead>\n    <tbody>\n      <tr ng-repeat=\"e in msg.events | limitTo:50\">\n        <td>{{e.ts | date:'HH:mm:ss'}}</td>\n        <td>{{e.type}}</td>\n        <td>{{e.robot_id}}</td>\n        <td>{{e.task_id}}</td>\n        <td>{{e.state}}</td>\n        <td>{{e.area || '-'}}</td>\n        <td>{{e.error_code || '-'}}</td>\n      </tr>\n    </tbody>\n  </table>\n\n  <div ng-if=\"!msg.events || !msg.events.length\" class=\"events-empty\">\n    No events yet.\n  </div>\n</div>\n\n<style>\n  .events-wrapper {\n    padding-top:4px;\n  }\n  .events-table {\n    width:100%;\n    border-collapse:collapse;\n    font-size:11px;\n    background:#020617;\n    border-radius:10px;\n    overflow:hidden;\n    box-shadow:0 0 18px rgba(15,23,42,0.7);\n  }\n  .events-table thead {\n    background:linear-gradient(to right,#0f172a,#020617);\n  }\n  .events-table th,\n  .events-table td {\n    padding:4px 6px;\n    text-align:left;\n    border-bottom:1px solid rgba(30,41,59,0.9);\n    color:#E5E7EB;\n  }\n  .events-table th {\n    font-weight:600;\n    font-size:10px;\n    color:#9CA3AF;\n  }\n  .events-table tbody tr:hover {\n    background:rgba(15,23,42,0.8);\n  }\n  .events-empty {\n    font-size:12px;\n    color:#9CA3AF;\n    padding:8px;\n  }\n</style>\n",
+        "storeOutMessages": true,
+        "fwdInMessages": true,
+        "resendOnRefresh": true,
+        "templateScope": "local",
+        "className": "",
+        "x": 1020,
+        "y": 3000,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "f4058cf1557c02ec",
+        "type": "inject",
+        "z": "49f8711fc297a8c1",
+        "name": "Init global state",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": true,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 360,
+        "y": 180,
+        "wires": [
+            [
+                "dd5be1ad5697a1f2"
+            ]
+        ]
+    },
+    {
+        "id": "dd5be1ad5697a1f2",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "initGlobalState",
+        "func": "// // InitGlobalState (TRACK_POINTS + AREA_POS snap-to-track + agv1 init)\n\n// // -------------------------\n// // 0) Track generator (percent coords 0~100)\n// // -------------------------\n// function addLine(pts, a, b, steps) {\n//   for (let i = 1; i <= steps; i++) {\n//     const t = i / steps;\n//     pts.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });\n//   }\n// }\n\n// function addArc(pts, cx, cy, r, a0, a1, steps) {\n//   for (let i = 1; i <= steps; i++) {\n//     const t = i / steps;\n//     const a = a0 + (a1 - a0) * t;\n//     pts.push({ x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) });\n//   }\n// }\n\n// // \"둥근 사각 루프\"를 만든 뒤, 좌/우에 살짝 굴곡을 줘서 실제 트랙 느낌을 조금 냄\n// function makeTrackV1() {\n//   const l = 16, t = 14, r = 86, b = 86;  // 트랙 바운딩 박스 (퍼센트)\n//   const rad = 16;                        // 코너 라운드\n//   const pts = [];\n\n//   // 시작점: top edge의 left 라운드 끝\n//   pts.push({ x: l + rad, y: t });\n\n//   // top (left->right)\n//   addLine(pts, pts[pts.length - 1], { x: r - rad, y: t }, 40);\n//   // top-right corner (-90 -> 0)\n//   addArc(pts, r - rad, t + rad, rad, -Math.PI / 2, 0, 22);\n\n//   // right (top->bottom)\n//   addLine(pts, pts[pts.length - 1], { x: r, y: b - rad }, 52);\n//   // bottom-right corner (0 -> +90)\n//   addArc(pts, r - rad, b - rad, rad, 0, Math.PI / 2, 22);\n\n//   // bottom (right->left)\n//   addLine(pts, pts[pts.length - 1], { x: l + rad, y: b }, 40);\n//   // bottom-left corner (+90 -> 180)\n//   addArc(pts, l + rad, b - rad, rad, Math.PI / 2, Math.PI, 22);\n\n//   // left (bottom->top)\n//   addLine(pts, pts[pts.length - 1], { x: l, y: t + rad }, 52);\n//   // top-left corner (180 -> 270)\n//   addArc(pts, l + rad, t + rad, rad, Math.PI, 3 * Math.PI / 2, 22);\n\n//   // ---- warp(굴곡) ----\n//   // 왼쪽 구간: y 30~72 사이에서 안쪽으로 들어오는 굴곡(사진 트랙 왼쪽 느낌)\n//   // 오른쪽 구간: y 22~74 사이에서 바깥으로 살짝 부풀리는 굴곡\n//   function bump(y, y0, y1) {\n//     if (y <= y0 || y >= y1) return 0;\n//     const u = (y - y0) / (y1 - y0); // 0~1\n//     // 가운데가 가장 큰 완만한 봉우리\n//     return Math.sin(Math.PI * u) ** 2;\n//   }\n\n//   const warped = pts.map(p => {\n//     let { x, y } = p;\n\n//     // left edge 근처면 안쪽으로\n//     if (x <= l + 1.0) {\n//       const k = bump(y, 30, 72);\n//       x = x + 10 * k; // 안쪽(오른쪽)으로 최대 10%\n//     }\n\n//     // right edge 근처면 바깥으로 살짝\n//     if (x >= r - 1.0) {\n//       const k = bump(y, 22, 74);\n//       x = x + 6 * k; // 바깥(오른쪽)으로 최대 6%\n//     }\n\n//     // 클램프\n//     x = Math.max(3, Math.min(97, x));\n//     y = Math.max(3, Math.min(97, y));\n//     return { x, y };\n//   });\n\n//   return warped;\n// }\n\n// const TRACK_POINTS = makeTrackV1();\n// global.set(\"TRACK_POINTS\", TRACK_POINTS);\n\n// // -------------------------\n// // 1) Helper: snap point to nearest track point\n// // -------------------------\n// function dist2(a, b) {\n//   const dx = a.x - b.x, dy = a.y - b.y;\n//   return dx * dx + dy * dy;\n// }\n// function snapToTrack(p) {\n//   let best = TRACK_POINTS[0];\n//   let bestD = 1e18;\n//   for (let i = 0; i < TRACK_POINTS.length; i++) {\n//     const d = dist2(p, TRACK_POINTS[i]);\n//     if (d < bestD) { bestD = d; best = TRACK_POINTS[i]; }\n//   }\n//   return { x: best.x, y: best.y };\n// }\n\n// // -------------------------\n// // 2) AREA_POS (percent coords) + snap\n// // -------------------------\n// let AREA_POS = {\n//   CHARGE: { x: 50, y: 10 }, // 충전소(맨 위)\n//   WATER:  { x: 20, y: 38 }, // 정수기(왼쪽)\n//   DROP:   { x: 80, y: 38 }, // 환경정리/반납(오른쪽)\n//   RES_A:  { x: 28, y: 78 }, // 유저공간1\n//   RES_B:  { x: 50, y: 86 }, // 유저공간2\n//   RES_C:  { x: 72, y: 78 }, // 유저공간3\n// };\n\n// // 정류장은 트랙 위에 딱 붙게 스냅\n// for (const k of Object.keys(AREA_POS)) {\n//   AREA_POS[k] = snapToTrack(AREA_POS[k]);\n// }\n// global.set(\"AREA_POS\", AREA_POS);\n\n// // -------------------------\n// // 3) Global state init\n// // -------------------------\n// let robots = global.get(\"robots\") || {};\n// let taskQueue = global.get(\"taskQueue\") || [];\n// let events = global.get(\"events\") || [];\n\n// if (!robots[\"agv1\"]) robots[\"agv1\"] = {};\n\n// robots[\"agv1\"] = {\n//   ...(robots[\"agv1\"] || {}),\n//   robot_id: \"agv1\",\n//   state: \"idle\",\n//   task_id: null,\n//   battery: robots[\"agv1\"].battery ?? 100,\n\n//   // ✅ 시작 위치: 충전소 (트랙 위)\n//   area: \"CHARGE\",\n//   pose: { x: AREA_POS.CHARGE.x, y: AREA_POS.CHARGE.y, theta: 0 },\n\n//   error_code: null,\n//   updated_at: Date.now(),\n// };\n\n// global.set(\"robots\", robots);\n// global.set(\"taskQueue\", taskQueue);\n// global.set(\"events\", events);\n\n// node.status({ fill: \"green\", shape: \"dot\", text: \"init ok: TRACK + AREA_POS snapped\" });\n\n// // Firestore에도 반영(너희 /api/robots가 Firestore 보는 구조라서)\n// const db = global.get(\"db\");\n// if (db) {\n//   db.collection(\"robots\").doc(\"agv1\").set(robots[\"agv1\"], { merge: true })\n//     .catch(err => node.error(\"[init robots write] \" + err));\n// }\n\n// return null;\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n// InitGlobalState (CALIB TRACK_POINTS + AREA_POS by zone-box + agv1 init)\n\n// ======================================================\n// 0) (fallback) Track generator (percent coords 0~100)\n// ======================================================\nfunction addLine(pts, a, b, steps) {\n  for (let i = 1; i <= steps; i++) {\n    const t = i / steps;\n    pts.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });\n  }\n}\n\nfunction addArc(pts, cx, cy, r, a0, a1, steps) {\n  for (let i = 1; i <= steps; i++) {\n    const t = i / steps;\n    const a = a0 + (a1 - a0) * t;\n    pts.push({ x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) });\n  }\n}\n\n// \"둥근 사각 루프\" + 약간 굴곡\nfunction makeTrackV1() {\n  const l = 16, t = 14, r = 86, b = 86;\n  const rad = 16;\n  const pts = [];\n\n  pts.push({ x: l + rad, y: t });\n\n  addLine(pts, pts[pts.length - 1], { x: r - rad, y: t }, 40);\n  addArc(pts, r - rad, t + rad, rad, -Math.PI / 2, 0, 22);\n\n  addLine(pts, pts[pts.length - 1], { x: r, y: b - rad }, 52);\n  addArc(pts, r - rad, b - rad, rad, 0, Math.PI / 2, 22);\n\n  addLine(pts, pts[pts.length - 1], { x: l + rad, y: b }, 40);\n  addArc(pts, l + rad, b - rad, rad, Math.PI / 2, Math.PI, 22);\n\n  addLine(pts, pts[pts.length - 1], { x: l, y: t + rad }, 52);\n  addArc(pts, l + rad, t + rad, rad, Math.PI, 3 * Math.PI / 2, 22);\n\n  function bump(y, y0, y1) {\n    if (y <= y0 || y >= y1) return 0;\n    const u = (y - y0) / (y1 - y0);\n    return Math.sin(Math.PI * u) ** 2;\n  }\n\n  const warped = pts.map(p => {\n    let { x, y } = p;\n\n    if (x <= l + 1.0) {\n      const k = bump(y, 30, 72);\n      x = x + 10 * k;\n    }\n    if (x >= r - 1.0) {\n      const k = bump(y, 22, 74);\n      x = x + 6 * k;\n    }\n\n    x = Math.max(3, Math.min(97, x));\n    y = Math.max(3, Math.min(97, y));\n    return { x, y };\n  });\n\n  return warped;\n}\n\n// ======================================================\n// 1) Track load: calibration json(dense) 우선, 실패 시 fallback\n// ======================================================\nfunction clamp100(v) {\n  if (!Number.isFinite(v)) return 0;\n  return Math.max(0, Math.min(100, v));\n}\nfunction dist2(a, b) {\n  const dx = a.x - b.x, dy = a.y - b.y;\n  return dx * dx + dy * dy;\n}\nfunction normalizeTrack(points) {\n  let arr = Array.isArray(points) ? points : [];\n  arr = arr\n    .filter(p => p && Number.isFinite(p.x) && Number.isFinite(p.y))\n    .map(p => ({ x: clamp100(p.x), y: clamp100(p.y) }));\n\n  if (arr.length < 2) return arr;\n\n  // 캘리 dense는 보통 마지막 점이 첫 점과 같음(닫힘) -> 중복 1개 제거\n  const first = arr[0];\n  const last = arr[arr.length - 1];\n  if (dist2(first, last) < 0.0001) arr = arr.slice(0, -1);\n\n  return arr;\n}\n\n// NOTE) 여기 경로만 네 환경에 맞게 수정\n// - 권장: track_agv1.json을 .node-red 폴더에 두고 그 파일 경로를 사용\nconst TRACK_JSON_PATH = \"C:/Users/wp3wk/AppData/Roaming/SPB_Data/.node-red/track_agv1.json\";\n\n// fs는 Function 노드 \"Setup(Modules)\"에 fs 추가해두면 global.get(\"fs\")로 잡힘.\n// (없으면 require 시도 -> 그마저 막혀있으면 fallback 트랙 사용)\nlet fs = global.get(\"fs\");\nif (!fs) {\n  try { fs = require(\"fs\"); } catch (e) {}\n}\n\nlet TRACK_POINTS = null;\nlet trackSource = \"fallback(makeTrackV1)\";\n\nif (fs) {\n  try {\n    const raw = fs.readFileSync(TRACK_JSON_PATH, \"utf8\");\n    const obj = JSON.parse(raw);\n\n    // UserApp.vue 저장 포맷: { anchors:[], dense:[], saved_at:... }\n    if (Array.isArray(obj?.dense)) {\n      TRACK_POINTS = obj.dense;\n      trackSource = \"calib(json.dense)\";\n    } else if (Array.isArray(obj?.TRACK_POINTS)) {\n      TRACK_POINTS = obj.TRACK_POINTS;\n      trackSource = \"calib(json.TRACK_POINTS)\";\n    } else if (Array.isArray(obj)) {\n      TRACK_POINTS = obj;\n      trackSource = \"calib(json=array)\";\n    }\n  } catch (e) {\n    node.warn(\"[initGlobalState] Failed to load track json. path=\" + TRACK_JSON_PATH + \" err=\" + e);\n  }\n} else {\n  node.warn(\"[initGlobalState] fs not available. Add 'fs' in Function node Setup(Modules) or enable require(). Using fallback track.\");\n}\n\nTRACK_POINTS = normalizeTrack(TRACK_POINTS);\nif (!TRACK_POINTS || TRACK_POINTS.length < 2) {\n  TRACK_POINTS = makeTrackV1();\n  TRACK_POINTS = normalizeTrack(TRACK_POINTS);\n  trackSource = \"fallback(makeTrackV1)\";\n}\n\nglobal.set(\"TRACK_POINTS\", TRACK_POINTS);\n\n// ======================================================\n// 2) Helper: snap point to nearest track point\n// ======================================================\nfunction snapToTrack(p) {\n  let best = TRACK_POINTS[0];\n  let bestD = 1e18;\n  for (let i = 0; i < TRACK_POINTS.length; i++) {\n    const d = dist2(p, TRACK_POINTS[i]);\n    if (d < bestD) { bestD = d; best = TRACK_POINTS[i]; }\n  }\n  return { x: best.x, y: best.y };\n}\n\n// ======================================================\n// 3) AREA_POS: UserApp.vue의 zone 박스 기준으로 \"박스 안 트랙 점\" 선택\n// ======================================================\n// UserApp.vue CSS 기준(퍼센트):\n// .z-charge{ left:40 top:6 width:20 height:12 }\n// .z-water { left:8  top:22 width:22 height:16 }\n// .z-drop  { left:70 top:30 width:22 height:16 }\n// .z-a     { left:10 top:66 width:24 height:18 }\n// .z-b     { left:38 top:74 width:24 height:18 }\n// .z-c     { left:66 top:66 width:24 height:18 }\nconst ZONES = {\n  CHARGE: { left: 40, top:  6, width: 20, height: 12 },\n  WATER:  { left:  8, top: 22, width: 22, height: 16 },\n  DROP:   { left: 70, top: 30, width: 22, height: 16 },\n  RES_A:  { left: 10, top: 66, width: 24, height: 18 },\n  RES_B:  { left: 38, top: 74, width: 24, height: 18 },\n  RES_C:  { left: 66, top: 66, width: 24, height: 18 },\n};\n\nfunction zoneCenter(z) {\n  return { x: z.left + z.width / 2, y: z.top + z.height / 2 };\n}\n\nfunction pickStationOnTrackByZone(zone) {\n  const x0 = zone.left, x1 = zone.left + zone.width;\n  const y0 = zone.top,  y1 = zone.top + zone.height;\n  const c = zoneCenter(zone);\n\n  // 1) 박스 안에 들어오는 트랙 점 후보\n  let best = null;\n  let bestD = 1e18;\n  for (const p of TRACK_POINTS) {\n    if (p.x < x0 || p.x > x1 || p.y < y0 || p.y > y1) continue;\n    const d = dist2(c, p);\n    if (d < bestD) { bestD = d; best = p; }\n  }\n\n  // 2) 박스 안 후보가 없으면: center를 트랙에 snap\n  if (!best) return snapToTrack(c);\n  return { x: best.x, y: best.y };\n}\n\nlet AREA_POS = {\n  CHARGE: pickStationOnTrackByZone(ZONES.CHARGE),\n  WATER:  pickStationOnTrackByZone(ZONES.WATER),\n  DROP:   pickStationOnTrackByZone(ZONES.DROP),\n  RES_A:  pickStationOnTrackByZone(ZONES.RES_A),\n  RES_B:  pickStationOnTrackByZone(ZONES.RES_B),\n  RES_C:  pickStationOnTrackByZone(ZONES.RES_C),\n};\n\nglobal.set(\"AREA_POS\", AREA_POS);\n\n// ======================================================\n// 4) Global state init\n// ======================================================\nlet robots = global.get(\"robots\") || {};\nlet taskQueue = global.get(\"taskQueue\") || [];\nlet events = global.get(\"events\") || [];\n\nif (!robots[\"agv1\"]) robots[\"agv1\"] = {};\n\nrobots[\"agv1\"] = {\n  ...(robots[\"agv1\"] || {}),\n  robot_id: \"agv1\",\n  state: \"idle\",\n  task_id: null,\n  battery: robots[\"agv1\"].battery ?? 100,\n\n  // ✅ 시작 위치: 충전소 (트랙 위)\n  area: \"CHARGE\",\n  pose: { x: AREA_POS.CHARGE.x, y: AREA_POS.CHARGE.y, theta: 0 },\n\n  error_code: null,\n  updated_at: Date.now(),\n};\n\nglobal.set(\"robots\", robots);\nglobal.set(\"taskQueue\", taskQueue);\nglobal.set(\"events\", events);\n\nnode.status({ fill: \"green\", shape: \"dot\", text: `init ok: ${trackSource} + AREA_POS by zones` });\n\n// Firestore에도 반영\nconst db = global.get(\"db\");\nif (db) {\n  db.collection(\"robots\").doc(\"agv1\").set(robots[\"agv1\"], { merge: true })\n    .catch(err => node.error(\"[init robots write] \" + err));\n}\n\nreturn null;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 600,
+        "y": 180,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "5683f1a5e869fec8",
+        "type": "mqtt in",
+        "z": "49f8711fc297a8c1",
+        "name": "",
+        "topic": "robot/agv1/task",
+        "qos": "2",
+        "datatype": "utf8",
+        "broker": "3c16a07776b27396",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 360,
+        "y": 1480,
+        "wires": [
+            [
+                "4319d8f20df90726",
+                "a50e6fc76e6e8f77"
+            ]
+        ]
+    },
+    {
+        "id": "4319d8f20df90726",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "simulateAGV",
+        "func": "// // simulateAGV (UI %좌표 통일 + waypoint 동선 버전)\n// // input: robot/agv1/task (msg.payload = task JSON)\n// // output1: running stream (array of msgs w/ msg.delay)\n// // output2: done + idle (2 msgs w/ msg.delay)\n\n// let task;\n// try {\n//   task = JSON.parse(msg.payload || \"{}\");\n// } catch (e) {\n//   node.error(\"Invalid task JSON in simulateAGV\", msg);\n//   return null;\n// }\n\n// const robotId = \"agv1\";\n\n// // -------------------------\n// // 0) AREA_POS: UI percent coords (0~100)\n// // -------------------------\n// const AREA_POS = global.get(\"AREA_POS\") || {\n//   CHARGE: { x: 50, y: 10 },\n//   WATER:  { x: 18, y: 28 },\n//   DROP:   { x: 82, y: 42 },\n//   RES_A:  { x: 20, y: 70 },\n//   RES_B:  { x: 42, y: 82 },\n//   RES_C:  { x: 70, y: 82 },\n// };\n\n// // -------------------------\n// // 1) context state (battery/area/pose)\n// // -------------------------\n// let battery = context.get(\"battery\") ?? 80;\n// let area = String(context.get(\"area\") || \"CHARGE\").toUpperCase();\n// let pose = context.get(\"pose\") || null;\n\n// // 배터리 살짝 깎기\n// battery = Math.max(0, battery - 1);\n// context.set(\"battery\", battery);\n\n// // ✅ 구버전 그리드 좌표가 남아있는 경우 자동 리셋\n// function looksLikeOldGridPose(p) {\n//   // 예전 좌표는 대개 0~12 같은 작은 값\n//   return p && typeof p.x === \"number\" && typeof p.y === \"number\" && p.x <= 15 && p.y <= 15;\n// }\n// if (!pose || looksLikeOldGridPose(pose)) {\n//   const p0 = AREA_POS[area] || AREA_POS.CHARGE;\n//   pose = { x: p0.x, y: p0.y, theta: 0 };\n//   context.set(\"pose\", pose);\n// }\n\n// // area도 구버전 값일 수 있어 방어 (BASE/DOCK/USER1/USER2 등)\n// const legacyAreaMap = { BASE: \"CHARGE\", DOCK: \"CHARGE\", USER1: \"RES_A\", USER2: \"RES_B\" };\n// if (legacyAreaMap[area]) {\n//   area = legacyAreaMap[area];\n//   context.set(\"area\", area);\n// }\n\n// // -------------------------\n// // 2) waypoint plan (시연 동선용)\n// // -------------------------\n// function normTargetArea(raw) {\n//   const s = String(raw || \"\").toUpperCase();\n//   const map = { USER1: \"RES_A\", USER2: \"RES_B\", USER3: \"RES_C\", BASE: \"CHARGE\", HOME: \"CHARGE\", DOCK: \"CHARGE\" };\n//   if (map[s]) return map[s];\n//   if ([\"CHARGE\", \"WATER\", \"DROP\", \"RES_A\", \"RES_B\", \"RES_C\"].includes(s)) return s;\n//   return \"RES_B\";\n// }\n// const userArea = normTargetArea(task.target_area);\n\n// // type별 동선\n// // - deliver_water: (현재) -> WATER -> user -> CHARGE\n// // - collect_cup / collect_laundry: (현재) -> user -> DROP -> CHARGE\n// let waypoints = [];\n// if (task.type === \"deliver_water\") {\n//   waypoints = [\"WATER\", userArea, \"CHARGE\"];\n// } else if (task.type === \"collect_cup\" || task.type === \"collect_laundry\") {\n//   waypoints = [userArea, \"DROP\", \"CHARGE\"];\n// } else {\n//   // unknown: 그냥 target만 갔다가 충전소 복귀\n//   waypoints = [userArea, \"CHARGE\"];\n// }\n\n// // 현재 area가 waypoint 첫번째와 같으면 중복 제거\n// waypoints = waypoints.filter((w, i) => i === 0 || w !== waypoints[i - 1]);\n\n// // 현재 위치에서 첫 waypoint까지도 이동해야 하니 시작점 포함한 point list 만들기\n// function getPos(areaCode, fallbackPos) {\n//   return AREA_POS[areaCode] || fallbackPos;\n// }\n\n// // -------------------------\n// // 3) duration (expected 기반 + 지터) + 구간별 분배\n// // -------------------------\n// const base = Number(task.expected_duration_ms) || 12000;\n// const jitter = 0.85 + Math.random() * 0.30; // 0.85~1.15\n// const TOTAL_MS = Math.round(base * jitter);\n\n// const STEP_MS = 200;\n\n// function dist(a, b) {\n//   const dx = (b.x - a.x);\n//   const dy = (b.y - a.y);\n//   return Math.sqrt(dx * dx + dy * dy);\n// }\n\n// let curPos = { x: pose.x, y: pose.y };\n// let segmentPos = [];\n// for (const wp of waypoints) {\n//   segmentPos.push(getPos(wp, curPos));\n// }\n// const segDists = [];\n// let totalDist = 0;\n// let prev = curPos;\n// for (const p of segmentPos) {\n//   const d = dist(prev, p);\n//   segDists.push(d);\n//   totalDist += d;\n//   prev = p;\n// }\n// if (totalDist <= 0) totalDist = segDists.length; // 모두 0이면 균등분배\n\n// let segDur = segDists.map(d => Math.max(STEP_MS, Math.round(TOTAL_MS * (d / totalDist))));\n// let sumDur = segDur.reduce((a, b) => a + b, 0);\n// // 합이 TOTAL_MS랑 안맞으면 마지막에 보정\n// segDur[segDur.length - 1] = Math.max(STEP_MS, segDur[segDur.length - 1] - (sumDur - TOTAL_MS));\n\n// // -------------------------\n// // 4) running stream 생성\n// // -------------------------\n// function heading(from, to) {\n//   return Math.atan2((to.y - from.y), (to.x - from.x));\n// }\n// function lerp(a, b, t) {\n//   return a + (b - a) * t;\n// }\n\n// const msgsRunning = [];\n// let delayAcc = 0;\n\n// let curArea = area;\n// let fromPos = curPos;\n\n// for (let s = 0; s < segmentPos.length; s++) {\n//   const toPos = segmentPos[s];\n//   const target = waypoints[s];\n//   const dur = segDur[s];\n\n//   const steps = Math.max(1, Math.floor(dur / STEP_MS));\n\n//   for (let i = 0; i <= steps; i++) {\n//     const t = i / steps;\n//     const x = lerp(fromPos.x, toPos.x, t);\n//     const y = lerp(fromPos.y, toPos.y, t);\n//     const theta = heading({ x, y }, toPos);\n\n//     const runningStatus = {\n//       robot_id: robotId,\n//       state: \"running\",\n//       task_id: task.task_id || null,\n//       battery,\n//       area: curArea,          // 현재 구역(큰 의미) - 구간 시작 구역\n//       target_area: target,    // 지금 향하는 목적지\n//       error_code: null,\n//       pose: { x, y, theta },  // ✅ UI% 좌표\n//       updated_at: Date.now(),\n//     };\n\n//     msgsRunning.push({\n//       topic: `robot/${robotId}/status`,\n//       payload: JSON.stringify(runningStatus),\n//       delay: delayAcc + i * STEP_MS,\n//     });\n//   }\n\n//   // 구간 완료 → 현재 구역 갱신\n//   delayAcc += dur;\n//   fromPos = toPos;\n//   curArea = target;\n// }\n\n// // 완료 위치를 context에 저장 (대부분 CHARGE로 끝남)\n// pose = { x: fromPos.x, y: fromPos.y, theta: 0 };\n// context.set(\"pose\", pose);\n// context.set(\"area\", curArea);\n\n// // -------------------------\n// // 5) done + idle\n// // -------------------------\n// const doneStatus = {\n//   robot_id: robotId,\n//   state: \"done\",\n//   task_id: task.task_id || null,\n//   battery,\n//   area: curArea,\n//   target_area: null,\n//   error_code: null,\n//   pose,\n//   updated_at: Date.now(),\n// };\n\n// const idleStatus = {\n//   robot_id: robotId,\n//   state: \"idle\",\n//   task_id: null,\n//   battery,\n//   area: curArea,\n//   target_area: null,\n//   error_code: null,\n//   pose,\n//   updated_at: Date.now(),\n// };\n\n// const msgDone = {\n//   topic: `robot/${robotId}/status`,\n//   payload: JSON.stringify(doneStatus),\n//   delay: delayAcc,\n// };\n\n// const msgIdle = {\n//   topic: `robot/${robotId}/status`,\n//   payload: JSON.stringify(idleStatus),\n//   delay: delayAcc + 300,\n// };\n\n// return [msgsRunning, [msgDone, msgIdle]];\n\n\n\n\n// simulateAGV (TRACK 기반 주행 버전)\n// output1: running stream(msg.delay 사용), output2: done + idle\n\n// let task;\n// try {\n//   task = JSON.parse(msg.payload || \"{}\");\n// } catch (e) {\n//   node.error(\"Invalid task JSON in simulateAGV\", msg);\n//   return null;\n// }\n\n// const robotId = \"agv1\";\n// const STEP_MS = 200;\n\n// const AREA_POS = global.get(\"AREA_POS\") || {};\n// const TRACK = global.get(\"TRACK_POINTS\") || [];\n\n// if (!TRACK.length) {\n//   node.error(\"TRACK_POINTS not found. Run InitGlobalState first.\", msg);\n//   return null;\n// }\n\n// // -------------------------\n// // context state\n// // -------------------------\n// let battery = context.get(\"battery\") ?? 80;\n// let area = String(context.get(\"area\") || \"CHARGE\").toUpperCase();\n// let pose = context.get(\"pose\") || null;\n\n// // 배터리 살짝 깎기\n// battery = Math.max(0, battery - 1);\n// context.set(\"battery\", battery);\n\n// // 구버전 grid pose 방어\n// function looksLikeOldGridPose(p) {\n//   return p && typeof p.x === \"number\" && typeof p.y === \"number\" && p.x <= 15 && p.y <= 15;\n// }\n// if (!pose || looksLikeOldGridPose(pose)) {\n//   const p0 = AREA_POS[area] || AREA_POS.CHARGE;\n//   pose = { x: p0.x, y: p0.y, theta: 0 };\n//   context.set(\"pose\", pose);\n// }\n\n// // area legacy 방어\n// const legacyAreaMap = { BASE: \"CHARGE\", DOCK: \"CHARGE\", USER1: \"RES_A\", USER2: \"RES_B\", HOME: \"CHARGE\" };\n// if (legacyAreaMap[area]) {\n//   area = legacyAreaMap[area];\n//   context.set(\"area\", area);\n// }\n\n// // -------------------------\n// // helpers\n// // -------------------------\n// function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }\n// function heading(from, to) { return Math.atan2(to.y - from.y, to.x - from.x); }\n\n// function nearestIdx(p) {\n//   let best = 0;\n//   let bestD = 1e18;\n//   for (let i = 0; i < TRACK.length; i++) {\n//     const d = (TRACK[i].x - p.x) ** 2 + (TRACK[i].y - p.y) ** 2;\n//     if (d < bestD) { bestD = d; best = i; }\n//   }\n//   return best;\n// }\n\n// function sliceLoop(i0, i1, dir) {\n//   const n = TRACK.length;\n//   const out = [TRACK[i0]];\n//   let i = i0;\n//   while (i !== i1) {\n//     i = (i + dir + n) % n;\n//     out.push(TRACK[i]);\n//     if (out.length > n + 5) break; // safety\n//   }\n//   return out;\n// }\n\n// function pathLen(path) {\n//   let s = 0;\n//   for (let i = 1; i < path.length; i++) s += dist(path[i - 1], path[i]);\n//   return s;\n// }\n\n// function bestPathOnLoop(p0, p1) {\n//   const i0 = nearestIdx(p0);\n//   const i1 = nearestIdx(p1);\n//   const fwd = sliceLoop(i0, i1, +1);\n//   const bwd = sliceLoop(i0, i1, -1);\n//   return (pathLen(fwd) <= pathLen(bwd)) ? fwd : bwd;\n// }\n\n// // 거리기반 resample (steps+1개)\n// function resample(path, count) {\n//   if (!path.length) return [];\n//   if (path.length === 1) return Array(count).fill({ ...path[0] });\n\n//   // 누적거리\n//   const seg = [];\n//   let total = 0;\n//   for (let i = 1; i < path.length; i++) {\n//     const d = dist(path[i - 1], path[i]);\n//     seg.push(d);\n//     total += d;\n//   }\n//   if (total <= 1e-9) return Array(count).fill({ ...path[0] });\n\n//   const out = [];\n//   let acc = 0;\n//   let si = 0;\n\n//   out.push({ ...path[0] });\n\n//   for (let k = 1; k < count; k++) {\n//     const target = (total * k) / (count - 1);\n//     while (si < seg.length && acc + seg[si] < target) {\n//       acc += seg[si];\n//       si++;\n//     }\n//     if (si >= seg.length) { out.push({ ...path[path.length - 1] }); continue; }\n\n//     const t = (target - acc) / (seg[si] || 1);\n//     const a = path[si];\n//     const b = path[si + 1] || path[si];\n//     out.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });\n//   }\n//   return out;\n// }\n\n// // target_area 정규화\n// function normTargetArea(raw) {\n//   const s = String(raw || \"\").toUpperCase();\n//   const map = { USER1: \"RES_A\", USER2: \"RES_B\", USER3: \"RES_C\", BASE: \"CHARGE\", HOME: \"CHARGE\", DOCK: \"CHARGE\" };\n//   if (map[s]) return map[s];\n//   if ([\"CHARGE\", \"WATER\", \"DROP\", \"RES_A\", \"RES_B\", \"RES_C\"].includes(s)) return s;\n//   return \"RES_B\";\n// }\n// const userArea = normTargetArea(task.target_area);\n\n// // -------------------------\n// // waypoint plan\n// // -------------------------\n// let waypoints = [];\n// if (task.type === \"deliver_water\") {\n//   waypoints = [\"WATER\", userArea, \"CHARGE\"];\n// } else if (task.type === \"collect_cup\" || task.type === \"collect_laundry\") {\n//   waypoints = [userArea, \"DROP\", \"CHARGE\"];\n// } else {\n//   waypoints = [userArea, \"CHARGE\"];\n// }\n\n// // -------------------------\n// // duration (expected 기반 + 지터) + segment 분배\n// // -------------------------\n// const base = Number(task.expected_duration_ms) || 20000;\n// const jitter = 0.90 + Math.random() * 0.20; // 0.9~1.1 (너무 흔들리면 영상에서 어색해서 살짝만)\n// const TOTAL_MS = Math.round(base * jitter);\n\n// // segment별 path/거리 계산\n// let fromPos = { x: pose.x, y: pose.y };\n// let segPaths = [];\n// let segDists = [];\n// let totalDist = 0;\n\n// for (const wp of waypoints) {\n//   const toPos = AREA_POS[wp] || fromPos;\n//   const p = bestPathOnLoop(fromPos, toPos);\n//   const d = pathLen(p);\n//   segPaths.push({ target: wp, path: p, toPos });\n//   segDists.push(d);\n//   totalDist += d;\n//   fromPos = toPos;\n// }\n// if (totalDist <= 1e-9) totalDist = segDists.length;\n\n// // segment duration 배분\n// let segDur = segDists.map(d => Math.max(STEP_MS, Math.round(TOTAL_MS * (d / totalDist))));\n// let sumDur = segDur.reduce((a, b) => a + b, 0);\n// segDur[segDur.length - 1] = Math.max(STEP_MS, segDur[segDur.length - 1] - (sumDur - TOTAL_MS));\n\n// // -------------------------\n// // running stream 생성 (트랙 위)\n// // -------------------------\n// const msgsRunning = [];\n// let delayAcc = 0;\n// let curArea = area; // 마지막 도착 정류장(시작은 CHARGE)\n// const t0 = Date.now();\n\n// let curPos2 = { x: pose.x, y: pose.y };\n\n// for (let s = 0; s < segPaths.length; s++) {\n//   const { target, path, toPos } = segPaths[s];\n//   const dur = segDur[s];\n\n//   const steps = Math.max(1, Math.floor(dur / STEP_MS));\n//   let samples = resample(path, steps + 1);\n\n//   // 다음 세그먼트 시작과 중복 방지(첫 점 제거)\n//   if (s > 0 && samples.length > 0) samples = samples.slice(1);\n\n//   for (let i = 0; i < samples.length; i++) {\n//     const p = samples[i];\n//     const next = samples[Math.min(i + 1, samples.length - 1)];\n//     const theta = heading(p, next);\n\n//     const dly = delayAcc + i * STEP_MS;\n\n//     msgsRunning.push({\n//       topic: `robot/${robotId}/status`,\n//       payload: JSON.stringify({\n//         robot_id: robotId,\n//         state: \"running\",\n//         task_id: task.task_id || null,\n//         battery,\n//         area: curArea,       // ⭐ “마지막 도착 정류장”\n//         target_area: target, // ⭐ “지금 가는 정류장”\n//         error_code: null,\n//         pose: { x: p.x, y: p.y, theta },\n//         updated_at: t0 + dly,\n//       }),\n//       delay: dly,\n//     });\n//   }\n\n//   // 세그먼트 끝 → 정류장 도착\n//   delayAcc += dur;\n//   curArea = target;\n//   curPos2 = toPos;\n// }\n\n// // 완료 위치 저장(대부분 CHARGE)\n// context.set(\"pose\", { x: curPos2.x, y: curPos2.y, theta: 0 });\n// context.set(\"area\", curArea);\n\n// // -------------------------\n// // done + idle\n// // -------------------------\n// const doneStatus = {\n//   robot_id: robotId,\n//   state: \"done\",\n//   task_id: task.task_id || null,\n//   battery,\n//   area: curArea,\n//   target_area: null,\n//   error_code: null,\n//   pose: { x: curPos2.x, y: curPos2.y, theta: 0 },\n//   updated_at: t0 + delayAcc,\n// };\n\n// const idleStatus = {\n//   ...doneStatus,\n//   state: \"idle\",\n//   task_id: null,\n//   updated_at: t0 + delayAcc + 300,\n// };\n\n// return [\n//   msgsRunning,\n//   [\n//     { topic: `robot/${robotId}/status`, payload: JSON.stringify(doneStatus), delay: delayAcc },\n//     { topic: `robot/${robotId}/status`, payload: JSON.stringify(idleStatus), delay: delayAcc + 300 },\n//   ],\n// ];\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nlet task;\ntry {\n  task = JSON.parse(msg.payload || \"{}\");\n} catch (e) {\n  node.error(\"Invalid task JSON in simulateAGV\", msg);\n  return null;\n}\n\nconst robotId = \"agv1\";\nconst STEP_MS = 200;\n\nconst AREA_POS = global.get(\"AREA_POS\") || {};\nconst RAW_TRACK = global.get(\"TRACK_POINTS\") || [];\n\n// -------------------------\n// ✅ NEW) Track normalize (calib dense often has last==first)\n// -------------------------\nfunction clamp100(v) {\n  if (!Number.isFinite(v)) return 0;\n  return Math.max(0, Math.min(100, v));\n}\nfunction dist2(a, b) {\n  const dx = a.x - b.x, dy = a.y - b.y;\n  return dx * dx + dy * dy;\n}\nfunction normalizeTrack(points) {\n  let arr = Array.isArray(points) ? points : [];\n  arr = arr\n    .filter(p => p && Number.isFinite(p.x) && Number.isFinite(p.y))\n    .map(p => ({ x: clamp100(p.x), y: clamp100(p.y) }));\n\n  if (arr.length < 2) return arr;\n\n  // (1) 마지막 점이 첫 점과 같으면 제거\n  if (dist2(arr[0], arr[arr.length - 1]) < 0.0001) {\n    arr = arr.slice(0, -1);\n  }\n\n  // (2) 연속 중복도 제거 (혹시 모를 안전장치)\n  const out = [arr[0]];\n  for (let i = 1; i < arr.length; i++) {\n    if (dist2(arr[i], out[out.length - 1]) < 0.0001) continue;\n    out.push(arr[i]);\n  }\n  return out;\n}\n\nconst TRACK = normalizeTrack(RAW_TRACK);\n\nif (!TRACK.length) {\n  node.error(\"TRACK_POINTS not found. Run InitGlobalState first.\", msg);\n  return null;\n}\n\n// -------------------------\n// context state\n// -------------------------\nlet battery = context.get(\"battery\") ?? 80;\nlet area = String(context.get(\"area\") || \"CHARGE\").toUpperCase();\nlet pose = context.get(\"pose\") || null;\n\n// 배터리 살짝 깎기\nbattery = Math.max(0, battery - 1);\ncontext.set(\"battery\", battery);\n\n// -------------------------\n// helpers\n// -------------------------\nfunction dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }\nfunction heading(from, to) { return Math.atan2(to.y - from.y, to.x - from.x); }\n\nfunction nearestIdx(p) {\n  let best = 0;\n  let bestD = 1e18;\n  for (let i = 0; i < TRACK.length; i++) {\n    const d = (TRACK[i].x - p.x) ** 2 + (TRACK[i].y - p.y) ** 2;\n    if (d < bestD) { bestD = d; best = i; }\n  }\n  return best;\n}\n\n// ✅ NEW) snapToTrack: AREA_POS 누락/pose 이상 시 안전하게 트랙 위로 올리기\nfunction snapToTrack(p) {\n  const i = nearestIdx(p);\n  const q = TRACK[i] || TRACK[0];\n  return { x: q.x, y: q.y };\n}\n\n// ✅ NEW) pose/AREA_POS 방어 강화\nfunction looksLikeOldGridPose(p) {\n  return p && typeof p.x === \"number\" && typeof p.y === \"number\" && p.x <= 15 && p.y <= 15;\n}\nif (!pose || looksLikeOldGridPose(pose)) {\n  const p0 = AREA_POS[area] || AREA_POS.CHARGE || TRACK[0];\n  pose = { x: p0.x, y: p0.y, theta: 0 };\n  // 혹시 AREA_POS가 트랙 밖이면 트랙으로 스냅\n  const sp = snapToTrack(pose);\n  pose = { x: sp.x, y: sp.y, theta: 0 };\n  context.set(\"pose\", pose);\n}\n\n// area legacy 방어\nconst legacyAreaMap = { BASE: \"CHARGE\", DOCK: \"CHARGE\", USER1: \"RES_A\", USER2: \"RES_B\", HOME: \"CHARGE\" };\nif (legacyAreaMap[area]) {\n  area = legacyAreaMap[area];\n  context.set(\"area\", area);\n}\n\nfunction sliceLoop(i0, i1, dir) {\n  const n = TRACK.length;\n  const out = [TRACK[i0]];\n  let i = i0;\n  while (i !== i1) {\n    i = (i + dir + n) % n;\n    out.push(TRACK[i]);\n    if (out.length > n + 5) break; // safety\n  }\n  return out;\n}\n\nfunction pathLen(path) {\n  let s = 0;\n  for (let i = 1; i < path.length; i++) s += dist(path[i - 1], path[i]);\n  return s;\n}\n\nfunction bestPathOnLoop(p0, p1) {\n  // ✅ NEW) 시작/도착도 트랙으로 스냅해서 루프 인덱스 안정화\n  const sp0 = snapToTrack(p0);\n  const sp1 = snapToTrack(p1);\n\n  const i0 = nearestIdx(sp0);\n  const i1 = nearestIdx(sp1);\n\n  const fwd = sliceLoop(i0, i1, +1);\n  const bwd = sliceLoop(i0, i1, -1);\n  return (pathLen(fwd) <= pathLen(bwd)) ? fwd : bwd;\n}\n\n// 거리기반 resample (steps+1개)\nfunction resample(path, count) {\n  if (!path.length) return [];\n  if (path.length === 1) return Array(count).fill({ ...path[0] });\n\n  const seg = [];\n  let total = 0;\n  for (let i = 1; i < path.length; i++) {\n    const d = dist(path[i - 1], path[i]);\n    seg.push(d);\n    total += d;\n  }\n  if (total <= 1e-9) return Array(count).fill({ ...path[0] });\n\n  const out = [];\n  let acc = 0;\n  let si = 0;\n\n  out.push({ ...path[0] });\n\n  for (let k = 1; k < count; k++) {\n    const target = (total * k) / (count - 1);\n    while (si < seg.length && acc + seg[si] < target) {\n      acc += seg[si];\n      si++;\n    }\n    if (si >= seg.length) { out.push({ ...path[path.length - 1] }); continue; }\n\n    const t = (target - acc) / (seg[si] || 1);\n    const a = path[si];\n    const b = path[si + 1] || path[si];\n    out.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });\n  }\n  return out;\n}\n\n// target_area 정규화\nfunction normTargetArea(raw) {\n  const s = String(raw || \"\").toUpperCase();\n  const map = { USER1: \"RES_A\", USER2: \"RES_B\", USER3: \"RES_C\", BASE: \"CHARGE\", HOME: \"CHARGE\", DOCK: \"CHARGE\" };\n  if (map[s]) return map[s];\n  if ([\"CHARGE\", \"WATER\", \"DROP\", \"RES_A\", \"RES_B\", \"RES_C\"].includes(s)) return s;\n  return \"RES_B\";\n}\nconst userArea = normTargetArea(task.target_area);\n\n// -------------------------\n// waypoint plan\n// -------------------------\nlet waypoints = [];\nif (task.type === \"deliver_water\") {\n  waypoints = [\"WATER\", userArea, \"CHARGE\"];\n} else if (task.type === \"collect_cup\" || task.type === \"collect_laundry\") {\n  waypoints = [userArea, \"DROP\", \"CHARGE\"];\n} else {\n  waypoints = [userArea, \"CHARGE\"];\n}\n\n// -------------------------\n// duration (expected 기반 + 지터) + segment 분배\n// -------------------------\nconst base = Number(task.expected_duration_ms) || 20000;\nconst jitter = 0.90 + Math.random() * 0.20; // 0.9~1.1\nconst TOTAL_MS = Math.round(base * jitter);\n\n// segment별 path/거리 계산\nlet fromPos = { x: pose.x, y: pose.y };\nlet segPaths = [];\nlet segDists = [];\nlet totalDist = 0;\n\nfor (const wp of waypoints) {\n  // ✅ NEW) AREA_POS가 없으면 fromPos 기준 스냅(안 죽게)\n  const toPosRaw = AREA_POS[wp] || fromPos;\n  const toPos = snapToTrack(toPosRaw);\n\n  const p = bestPathOnLoop(fromPos, toPos);\n  const d = pathLen(p);\n\n  segPaths.push({ target: wp, path: p, toPos });\n  segDists.push(d);\n  totalDist += d;\n  fromPos = toPos;\n}\nif (totalDist <= 1e-9) totalDist = segDists.length;\n\n// segment duration 배분\nlet segDur = segDists.map(d => Math.max(STEP_MS, Math.round(TOTAL_MS * (d / totalDist))));\nlet sumDur = segDur.reduce((a, b) => a + b, 0);\nsegDur[segDur.length - 1] = Math.max(STEP_MS, segDur[segDur.length - 1] - (sumDur - TOTAL_MS));\n\n// -------------------------\n// running stream 생성 (트랙 위)\n// -------------------------\nconst msgsRunning = [];\nlet delayAcc = 0;\nlet curArea = area; // 마지막 도착 정류장\nconst t0 = Date.now();\n\nlet curPos2 = { x: pose.x, y: pose.y };\n\nfor (let s = 0; s < segPaths.length; s++) {\n  const { target, path, toPos } = segPaths[s];\n  const dur = segDur[s];\n\n  const steps = Math.max(1, Math.floor(dur / STEP_MS));\n  let samples = resample(path, steps + 1);\n\n  // 다음 세그먼트 시작과 중복 방지(첫 점 제거)\n  if (s > 0 && samples.length > 0) samples = samples.slice(1);\n\n  for (let i = 0; i < samples.length; i++) {\n    const p = samples[i];\n    const next = samples[Math.min(i + 1, samples.length - 1)];\n    const theta = heading(p, next);\n\n    const dly = delayAcc + i * STEP_MS;\n\n    msgsRunning.push({\n      topic: `robot/${robotId}/status`,\n      payload: JSON.stringify({\n        robot_id: robotId,\n        state: \"running\",\n        task_id: task.task_id || null,\n        battery,\n        area: curArea,\n        target_area: target,\n        error_code: null,\n        pose: { x: p.x, y: p.y, theta },\n        updated_at: t0 + dly,\n      }),\n      delay: dly,\n    });\n  }\n\n  // 세그먼트 끝 → 정류장 도착\n  delayAcc += dur;\n  curArea = target;\n  curPos2 = toPos;\n}\n\n// 완료 위치 저장\ncontext.set(\"pose\", { x: curPos2.x, y: curPos2.y, theta: 0 });\ncontext.set(\"area\", curArea);\n\n// -------------------------\n// done + idle\n// -------------------------\nconst doneStatus = {\n  robot_id: robotId,\n  state: \"done\",\n  task_id: task.task_id || null,\n  battery,\n  area: curArea,\n  target_area: null,\n  error_code: null,\n  pose: { x: curPos2.x, y: curPos2.y, theta: 0 },\n  updated_at: t0 + delayAcc,\n};\n\nconst idleStatus = {\n  ...doneStatus,\n  state: \"idle\",\n  task_id: null,\n  updated_at: t0 + delayAcc + 300,\n};\n\nreturn [\n  msgsRunning,\n  [\n    { topic: `robot/${robotId}/status`, payload: JSON.stringify(doneStatus), delay: delayAcc },\n    { topic: `robot/${robotId}/status`, payload: JSON.stringify(idleStatus), delay: delayAcc + 300 },\n  ],\n];\n",
+        "outputs": 2,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 850,
+        "y": 1480,
+        "wires": [
+            [
+                "c892835546595db4"
+            ],
+            [
+                "c892835546595db4"
+            ]
+        ]
+    },
+    {
+        "id": "e5f2fa78b4c8f5b4",
+        "type": "mqtt out",
+        "z": "49f8711fc297a8c1",
+        "name": "",
+        "topic": "",
+        "qos": "",
+        "retain": "",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "3c16a07776b27396",
+        "x": 1470,
+        "y": 1420,
+        "wires": []
+    },
+    {
+        "id": "5462d48ba72465a3",
+        "type": "mqtt out",
+        "z": "49f8711fc297a8c1",
+        "name": "",
+        "topic": "",
+        "qos": "",
+        "retain": "",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "3c16a07776b27396",
+        "x": 1470,
+        "y": 1560,
+        "wires": []
+    },
+    {
+        "id": "c892835546595db4",
+        "type": "delay",
+        "z": "49f8711fc297a8c1",
+        "name": "",
+        "pauseType": "delayv",
+        "timeout": "5",
+        "timeoutUnits": "seconds",
+        "rate": "1",
+        "nbRateUnits": "1",
+        "rateUnits": "second",
+        "randomFirst": "1",
+        "randomLast": "5",
+        "randomUnits": "seconds",
+        "drop": false,
+        "allowrate": false,
+        "outputs": 1,
+        "x": 1060,
+        "y": 1560,
+        "wires": [
+            [
+                "5462d48ba72465a3",
+                "d79424313dccb2f0"
+            ]
+        ]
+    },
+    {
+        "id": "a50e6fc76e6e8f77",
+        "type": "debug",
+        "z": "49f8711fc297a8c1",
+        "name": "debug 3",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 540,
+        "y": 1500,
+        "wires": []
+    },
+    {
+        "id": "d79424313dccb2f0",
+        "type": "debug",
+        "z": "49f8711fc297a8c1",
+        "name": "debug 4",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1220,
+        "y": 1580,
+        "wires": []
+    },
+    {
+        "id": "0e18ed358d9967fb",
+        "type": "debug",
+        "z": "49f8711fc297a8c1",
+        "name": "debug 5",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1220,
+        "y": 1440,
+        "wires": []
+    },
+    {
+        "id": "9a5002eb64eee3d0",
+        "type": "http in",
+        "z": "49f8711fc297a8c1",
+        "name": "GET /api/robots",
+        "url": "/api/robots",
+        "method": "get",
+        "upload": false,
+        "skipBodyParsing": false,
+        "swaggerDoc": "",
+        "x": 400,
+        "y": 1740,
+        "wires": [
+            [
+                "1099aa542425c508"
+            ]
+        ]
+    },
+    {
+        "id": "1099aa542425c508",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "buildRobotsResponse",
+        "func": "// // global.robots를 읽어서 API 응답 형태로 만들어주는 함수\n\n// const robotsObj = global.get('robots') || {};\n// const robotsArr = [];\n\n// // 객체 → 배열로 변환\n// for (const id in robotsObj) {\n//     const r = robotsObj[id] || {};\n//     robotsArr.push(r);\n// }\n\n// // JSON 응답 형태 세팅\n// msg.payload = {\n//     robots: robotsArr\n// };\n\n// // 헤더에 JSON이라고 명시\n// msg.headers = {\n//     'Content-Type': 'application/json'\n// };\n\n// return msg;\n\nconst db = global.get(\"db\");\nif (!db) {\n  msg.statusCode = 503;\n  msg.headers = { \"Content-Type\": \"application/json\" };\n  msg.payload = { error: \"firestore not ready\" };\n  return msg;\n}\n\nconst limit = Math.min(parseInt((msg.req?.query?.limit ?? \"100\"), 10) || 100, 500);\n\nreturn new Promise(async (resolve) => {\n  try {\n    // updated_at 기준 최신순 (필드 없으면 인덱스/정렬 이슈 가능)\n    let q = db.collection(\"robots\");\n\n    // orderBy는 필드가 안정적으로 들어가야 함. 안 들어간 문서가 있으면 정렬에서 빠질 수 있음.\n    // 너 updateStatus에서 updated_at을 항상 넣고 있어서 OK. :contentReference[oaicite:2]{index=2}\n    q = q.orderBy(\"updated_at\", \"desc\").limit(limit);\n\n    const snap = await q.get();\n    const robots = snap.docs.map(d => d.data());\n\n    msg.statusCode = 200;\n    msg.headers = { \"Content-Type\": \"application/json\" };\n    msg.payload = { robots };\n    resolve(msg);\n  } catch (err) {\n    node.error(err);\n    msg.statusCode = 500;\n    msg.headers = { \"Content-Type\": \"application/json\" };\n    msg.payload = { error: \"failed to fetch robots\", detail: String(err?.message || err) };\n    resolve(msg);\n  }\n});",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 680,
+        "y": 1740,
+        "wires": [
+            [
+                "04c572829db161a8"
+            ]
+        ]
+    },
+    {
+        "id": "04c572829db161a8",
+        "type": "http response",
+        "z": "49f8711fc297a8c1",
+        "name": "res /api/robots",
+        "statusCode": "",
+        "headers": {},
+        "x": 980,
+        "y": 1740,
+        "wires": []
+    },
+    {
+        "id": "cf9e4d5c0ec26f3f",
+        "type": "http in",
+        "z": "49f8711fc297a8c1",
+        "name": "GET /api/tasks",
+        "url": "/api/tasks",
+        "method": "get",
+        "upload": false,
+        "skipBodyParsing": false,
+        "swaggerDoc": "",
+        "x": 400,
+        "y": 1820,
+        "wires": [
+            [
+                "4db69741e35d7aaa"
+            ]
+        ]
+    },
+    {
+        "id": "4db69741e35d7aaa",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "buildTasksResponse",
+        "func": "// let tasks = global.get('taskQueue') || [];\n\n// // 최신순 정렬 (Vue에서 보기 좋게)\n// tasks = tasks.slice().sort((a, b) => (b.created_at || 0) - (a.created_at || 0));\n\n// msg.payload = { tasks };\n// msg.headers = { \"Content-Type\": \"application/json\" };\n// return msg;\n\nconst db = global.get(\"db\");\nif (!db) {\n  msg.statusCode = 503;\n  msg.headers = { \"Content-Type\": \"application/json\" };\n  msg.payload = { error: \"firestore not ready\" };\n  return msg;\n}\n\nconst q = msg.req?.query || {};\nconst status = (q.status || \"\").toString().trim(); // pending|running|done|failed 등\nconst limit = Math.min(parseInt((q.limit ?? \"50\"), 10) || 50, 500);\n\nreturn new Promise(async (resolve) => {\n  try {\n    let ref = db.collection(\"tasks\");\n\n    // status 필터 (옵션)\n    if (status) {\n      ref = ref.where(\"status\", \"==\", status);\n      // where + orderBy 조합 시 인덱스 필요할 수 있음 (에러 메시지에 생성 링크 나옴)\n    }\n\n    // created_at 최신순\n    ref = ref.orderBy(\"created_at\", \"desc\").limit(limit);\n\n    const snap = await ref.get();\n    const tasks = snap.docs.map(d => d.data());\n\n    msg.statusCode = 200;\n    msg.headers = { \"Content-Type\": \"application/json\" };\n    msg.payload = { tasks };\n    resolve(msg);\n  } catch (err) {\n    node.error(err);\n    msg.statusCode = 500;\n    msg.headers = { \"Content-Type\": \"application/json\" };\n    msg.payload = { error: \"failed to fetch tasks\", detail: String(err?.message || err) };\n    resolve(msg);\n  }\n});\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 680,
+        "y": 1820,
+        "wires": [
+            [
+                "bd552ae11c61fc7b"
+            ]
+        ]
+    },
+    {
+        "id": "bd552ae11c61fc7b",
+        "type": "http response",
+        "z": "49f8711fc297a8c1",
+        "name": "res /api/tasks",
+        "statusCode": "",
+        "headers": {},
+        "x": 970,
+        "y": 1820,
+        "wires": []
+    },
+    {
+        "id": "3dc12e5ce8d5567e",
+        "type": "http in",
+        "z": "49f8711fc297a8c1",
+        "name": "GET /api/events",
+        "url": "/api/events",
+        "method": "get",
+        "upload": false,
+        "skipBodyParsing": false,
+        "swaggerDoc": "",
+        "x": 400,
+        "y": 1900,
+        "wires": [
+            [
+                "47eeabd70b7c449b"
+            ]
+        ]
+    },
+    {
+        "id": "47eeabd70b7c449b",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "buildEventsResponse",
+        "func": "// let events = global.get('events') || [];\n\n// // 최신순 정렬\n// events = events.slice().sort((a, b) => (b.ts || 0) - (a.ts || 0));\n\n// msg.payload = { events };\n// msg.headers = { \"Content-Type\": \"application/json\" };\n// return msg;\n\nconst db = global.get(\"db\");\nif (!db) {\n  msg.statusCode = 503;\n  msg.headers = { \"Content-Type\": \"application/json\" };\n  msg.payload = { error: \"firestore not ready\" };\n  return msg;\n}\n\nconst limit = Math.min(parseInt((msg.req?.query?.limit ?? \"50\"), 10) || 50, 500);\n\nreturn new Promise(async (resolve) => {\n  try {\n    const snap = await db\n      .collection(\"events\")\n      .orderBy(\"ts\", \"desc\")\n      .limit(limit)\n      .get();\n\n    const events = snap.docs.map(d => d.data());\n\n    msg.statusCode = 200;\n    msg.headers = { \"Content-Type\": \"application/json\" };\n    msg.payload = { events };\n    resolve(msg);\n  } catch (err) {\n    node.error(err);\n    msg.statusCode = 500;\n    msg.headers = { \"Content-Type\": \"application/json\" };\n    msg.payload = { error: \"failed to fetch events\", detail: String(err?.message || err) };\n    resolve(msg);\n  }\n});\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 680,
+        "y": 1900,
+        "wires": [
+            [
+                "14173b48771091af"
+            ]
+        ]
+    },
+    {
+        "id": "14173b48771091af",
+        "type": "http response",
+        "z": "49f8711fc297a8c1",
+        "name": "res /api/events",
+        "statusCode": "",
+        "headers": {},
+        "x": 980,
+        "y": 1900,
+        "wires": []
+    },
+    {
+        "id": "aae26e35525d4347",
+        "type": "http in",
+        "z": "49f8711fc297a8c1",
+        "name": "GET /api/summary",
+        "url": "/api/summary",
+        "method": "get",
+        "upload": false,
+        "skipBodyParsing": false,
+        "swaggerDoc": "",
+        "x": 410,
+        "y": 1980,
+        "wires": [
+            [
+                "3252b669c8d4ee2a"
+            ]
+        ]
+    },
+    {
+        "id": "3252b669c8d4ee2a",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "buildSummaryResponse",
+        "func": "// const robots = global.get('robots') || {};\n// const tasks = global.get('taskQueue') || [];\n\n// let total = 0, idle = 0, running = 0, charging = 0, error = 0, others = 0;\n// for (const id in robots) {\n//     total++;\n//     const s = (robots[id].state || '').toLowerCase();\n//     if (s === 'idle') idle++;\n//     else if (s === 'running') running++;\n//     else if (s === 'charging') charging++;\n//     else if (s === 'error' || s === 'failed' || s === 'fault') error++;\n//     else others++;\n// }\n\n// let tTotal = tasks.length;\n// let tPending = 0, tRunning = 0, tDone = 0, tFailed = 0;\n// for (const t of tasks) {\n//     const s = (t.status || '').toLowerCase();\n//     if (s === 'pending') tPending++;\n//     else if (s === 'running') tRunning++;\n//     else if (s === 'done') tDone++;\n//     else if (s === 'failed') tFailed++;\n// }\n\n// msg.payload = {\n//     robots: { total, idle, running, charging, error, others },\n//     tasks:  { total: tTotal, pending: tPending, running: tRunning, done: tDone, failed: tFailed }\n// };\n// msg.headers = { \"Content-Type\": \"application/json\" };\n// return msg;\n\nconst db = global.get(\"db\");\nif (!db) {\n  msg.statusCode = 503;\n  msg.headers = { \"Content-Type\": \"application/json\" };\n  msg.payload = { error: \"firestore not ready\" };\n  return msg;\n}\n\nconst q = msg.req?.query || {};\nconst taskLimit = Math.min(parseInt((q.taskLimit ?? \"200\"), 10) || 200, 1000);\n\nfunction countBy(list, keyFn) {\n  const m = {};\n  for (const x of list) {\n    const k = (keyFn(x) || \"unknown\").toLowerCase();\n    m[k] = (m[k] || 0) + 1;\n  }\n  return m;\n}\n\nreturn new Promise(async (resolve) => {\n  try {\n    // 1) robots 전부 읽어서 상태 카운트\n    const robotsSnap = await db.collection(\"robots\").get();\n    const robots = robotsSnap.docs.map(d => d.data());\n    const robotCounts = countBy(robots, r => r.state);\n\n    const robotSummary = {\n      total: robots.length,\n      idle: robotCounts.idle || 0,\n      running: robotCounts.running || 0,\n      charging: robotCounts.charging || 0,\n      error: (robotCounts.error || 0) + (robotCounts.failed || 0) + (robotCounts.fault || 0),\n      others:\n        (robotCounts.offline || 0) +\n        (robotCounts.unknown || 0)\n    };\n\n    // 2) tasks는 최근 N개만 읽어서 상태 카운트 (Phase 0 가벼운 집계)\n    const tasksSnap = await db\n      .collection(\"tasks\")\n      .orderBy(\"created_at\", \"desc\")\n      .limit(taskLimit)\n      .get();\n\n    const tasks = tasksSnap.docs.map(d => d.data());\n    const taskCounts = countBy(tasks, t => t.status);\n\n    const taskSummary = {\n      total: tasks.length,\n      pending: taskCounts.pending || 0,\n      running: taskCounts.running || 0,\n      done: taskCounts.done || 0,\n      failed: taskCounts.failed || 0\n    };\n\n    msg.statusCode = 200;\n    msg.headers = { \"Content-Type\": \"application/json\" };\n    msg.payload = { robots: robotSummary, tasks: taskSummary, meta: { taskLimit } };\n    resolve(msg);\n  } catch (err) {\n    node.error(err);\n    msg.statusCode = 500;\n    msg.headers = { \"Content-Type\": \"application/json\" };\n    msg.payload = { error: \"failed to fetch summary\", detail: String(err?.message || err) };\n    resolve(msg);\n  }\n});\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 690,
+        "y": 1980,
+        "wires": [
+            [
+                "bb5bd9f96e8e8313"
+            ]
+        ]
+    },
+    {
+        "id": "bb5bd9f96e8e8313",
+        "type": "http response",
+        "z": "49f8711fc297a8c1",
+        "name": "res /api/summary",
+        "statusCode": "",
+        "headers": {},
+        "x": 990,
+        "y": 1980,
+        "wires": []
+    },
+    {
+        "id": "a90b7ad07ef61884",
+        "type": "inject",
+        "z": "49f8711fc297a8c1",
+        "name": "FIrestore Client Init",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": true,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 370,
+        "y": 80,
+        "wires": [
+            [
+                "f1509788aad45a75"
+            ]
+        ]
+    },
+    {
+        "id": "f1509788aad45a75",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "Init Firestore",
+        "func": "// admin, fs 는 Function 노드 Setup(Modules)에서 주입받는다고 가정\n\n// const keyPath = \"C:/Users/wp3wk/AppData/Roaming/SPB_Data/.node-red/agv-pjt2-firebase-adminsdk-fbsvc-18055a3bd9.json\"; // 내 파이어스토어\nconst keyPath = \"C:/Users/wp3wk/AppData/Roaming/SPB_Data/.node-red/agv-pjt2-9d394-firebase-adminsdk-fbsvc-9079c95fe9.json\" // 유진이 파이어스토어\n// 0) 서비스 계정 파일 존재 확인\nif (!fs.existsSync(keyPath)) {\n  node.error(\"❌ Service account json not found: \" + keyPath);\n  return null;\n}\n\nconst serviceAccount = JSON.parse(fs.readFileSync(keyPath, \"utf8\"));\n\n// 1) 기존 firebase-admin 앱이 있으면 제거 (프로젝트 변경 시 필수)\nif (admin.apps && admin.apps.length > 0) {\n  return admin.app().delete().then(() => {\n    node.warn(\"♻️ Old firebase app deleted. Re-initializing...\");\n    return init();\n  }).catch(err => {\n    node.error(\"❌ Failed to delete old firebase app: \" + err.message);\n    return null;\n  });\n}\n\n// 2) 실제 초기화 함수\nfunction init() {\n  admin.initializeApp({\n    credential: admin.credential.cert(serviceAccount),\n  });\n\n  const db = admin.firestore();\n\n  global.set(\"admin\", admin);\n  global.set(\"db\", db);\n  global.set(\"firestoreReady\", true);\n\n  // 3) healthcheck write (성공 여부 명확히 확인)\n  return db.collection(\"_healthcheck\").doc(\"init\").set({\n    ts: Date.now(),\n    project_id: serviceAccount.project_id,\n  }).then(() => {\n    node.warn(\"✅ Firestore initialized!\");\n    node.warn(\"👉 project_id = \" + serviceAccount.project_id);\n    return null;\n  }).catch(err => {\n    node.error(\"❌ Firestore healthcheck write failed: \" + err.message);\n    return null;\n  });\n}\n\nreturn init();\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [
+            {
+                "var": "admin",
+                "module": "firebase-admin"
+            },
+            {
+                "var": "fs",
+                "module": "fs"
+            }
+        ],
+        "x": 610,
+        "y": 80,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "2ccacb1608c5ba74",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "FS : write task (create)",
+        "func": "const db = global.get(\"db\");\nif (!db) {\n    node.warn(\"Firestore not ready - skip write\");\n    return msg;\n}\n\nconst task = msg.task;\nif (!task || !task.task_id) return msg;\n\ndb.collection(\"tasks\").doc(task.task_id).set(task, { merge: true })\n    .then(() => node.warn(`FS task created: ${task.task_id}`))\n    .catch(err => node.error(err));\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1080,
+        "y": 1120,
+        "wires": [
+            [
+                "8fa070ba704430fc",
+                "ce111f86ccf22e93"
+            ]
+        ]
+    },
+    {
+        "id": "58d8d616da6872e1",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "FS: update task (assigned)",
+        "func": "const db = global.get(\"db\");\nif (!db) return msg;\n\nconst task = msg.task;\nif (!task || !task.task_id) return msg;\n\ndb.collection(\"tasks\").doc(task.task_id).set(task, { merge: true })\n    .then(() => node.warn(`FS task assigned: ${task.task_id}`))\n    .catch(err => node.error(err));\n\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1780,
+        "y": 1120,
+        "wires": [
+            [
+                "c02ac5399c925f84"
+            ]
+        ]
+    },
+    {
+        "id": "241f54b35e15895f",
+        "type": "delay",
+        "z": "49f8711fc297a8c1",
+        "name": "",
+        "pauseType": "delay",
+        "timeout": "1",
+        "timeoutUnits": "seconds",
+        "rate": "2",
+        "nbRateUnits": "",
+        "rateUnits": "second",
+        "randomFirst": "1",
+        "randomLast": "5",
+        "randomUnits": "seconds",
+        "drop": false,
+        "allowrate": true,
+        "outputs": 1,
+        "x": 1040,
+        "y": 1420,
+        "wires": [
+            [
+                "e5f2fa78b4c8f5b4",
+                "0e18ed358d9967fb"
+            ]
+        ]
+    },
+    {
+        "id": "54431a46252d1602",
+        "type": "http request",
+        "z": "49f8711fc297a8c1",
+        "name": "",
+        "method": "POST",
+        "ret": "obj",
+        "paytoqs": "ignore",
+        "url": "https://gms.ssafy.io/gmsapi/api.openai.com/v1/chat/completions",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": false,
+        "headers": [],
+        "x": 910,
+        "y": 480,
+        "wires": [
+            [
+                "7dea3543f230c5e1",
+                "fd22aea86440924f"
+            ]
+        ]
+    },
+    {
+        "id": "c301115701d2a789",
+        "type": "mqtt out",
+        "z": "49f8711fc297a8c1",
+        "name": "",
+        "topic": "",
+        "qos": "",
+        "retain": "",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "3c16a07776b27396",
+        "x": 1930,
+        "y": 520,
+        "wires": []
+    },
+    {
+        "id": "1f3be0f0cf23a955",
+        "type": "telegram sender",
+        "z": "49f8711fc297a8c1",
+        "name": "",
+        "bot": "d10c4415b361b866",
+        "haserroroutput": false,
+        "outputs": 1,
+        "x": 1950,
+        "y": 440,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "7dea3543f230c5e1",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "LLMValidate",
+        "func": "const chatId = msg._tg?.chatId;\nconst raw = msg._tg?.raw || \"\";\nconst interactionId = msg._interactionId;\n\nif (!interactionId) {\n  node.error(\"LLMValidate: missing msg._interactionId\", msg);\n  return null;\n}\n\n\nfunction makeReply(content) {\n  return { payload: { chatId, type: \"message\", content } };\n}\n\nfunction fsUpdate(patch) {\n  return {\n    payload: {\n      interaction_id: interactionId,\n      updated_at: Date.now(),\n      ...patch\n    }\n  };\n}\n\n// content 꺼내기\nlet content = msg.payload?.choices?.[0]?.message?.content || \"\";\n\n// JSON만 추출\nfunction extractJson(text) {\n  if (!text) return null;\n  text = text.replace(/```json\\s*/g, \"\").replace(/```\\s*/g, \"\").trim();\n  const s = text.indexOf(\"{\");\n  const e = text.lastIndexOf(\"}\");\n  if (s === -1 || e === -1 || e <= s) return null;\n  return text.slice(s, e + 1);\n}\n\nconst jsonStr = extractJson(content);\nif (!jsonStr) {\n  const fsMsg = fsUpdate({\n    result: \"rejected\",\n    error: { stage: \"llm/validate\", message: \"no json extracted\" }\n  });\n  return [makeReply(\"죄송해요 😥 요청을 이해하지 못했어요. 버튼으로 다시 해주세요.\"), null, fsMsg];\n}\n\nlet parsed;\ntry { parsed = JSON.parse(jsonStr); }\ncatch {\n  const fsMsg = fsUpdate({\n    result: \"rejected\",\n    error: { stage: \"llm/validate\", message: \"json parse failed\" }\n  });\n  return [makeReply(\"죄송해요 😥 요청 해석 결과가 깨졌어요. 버튼으로 다시 해주세요.\"), null, fsMsg];\n}\n\n// allow-list\nconst ALLOW_TYPE = new Set([\"deliver_water\", \"collect_cup\", \"collect_laundry\"]);\nconst ALLOW_AREA = new Set([\"USER1\", \"USER2\", \"DOCK\", \"BASE\"]);\n\nconst type = parsed.type;\nlet area = parsed.target_area;\n\n// type은 반드시 있어야 함\nif (!ALLOW_TYPE.has(type)) {\n  const fsMsg = fsUpdate({\n    result: \"rejected\",\n    error: { stage: \"llm/validate\", message: `type not allowed: ${String(type)}` },\n    parsed: { type: String(type || \"\"), target_area: String(parsed?.target_area || \"\"), confidence: parsed?.confidence ?? null }\n  });\n  return [makeReply(\"무슨 요청인지 판단하지 못했어요 😥\\n버튼으로 다시 선택해 주세요.\"), null, fsMsg];\n}\n\n// ✅ default area fallback (임시: flow에 저장, 없으면 USER1)\nlet defaultArea = flow.get(\"default_area_\" + chatId);\nif (!defaultArea) defaultArea = \"USER1\";\n\n// ✅ area가 없거나 이상하면 default로 채움\nif (!ALLOW_AREA.has(area)) {\n  area = defaultArea;\n}\n\n// topic 결정\nconst topic =\n  type === \"deliver_water\" ? \"cmd/water/request\" :\n  type === \"collect_cup\" ? \"cmd/cup/request\" :\n  \"cmd/laundry/request\";\n\n// mqtt\nconst mqttMsg = {\n  topic,\n  payload: JSON.stringify({\n    type,\n    target_area: area,\n    user_id: `tg_${chatId}`,\n    meta: {\n      source: \"telegram\",\n      input: \"text\",\n      raw,\n      default_area_used: !parsed.target_area,\n      interaction_id: interactionId\n    }\n  })\n};\n\nconst pretty =\n  type === \"deliver_water\" ? \"물 배달\" :\n  type === \"collect_cup\" ? \"컵 수거\" : \"세탁물 수거\";\n\nconst usedMsg = (!parsed.target_area) ? ` (기본 위치: ${area})` : \"\";\n\nconst fsMsg = fsUpdate({\n  result: \"accepted\",\n  parsed: { type, target_area: area, confidence: parsed?.confidence ?? null }\n});\n\nreturn [makeReply(`✅ ${pretty} 요청을 접수했어요!${usedMsg}`), mqttMsg, fsMsg];\n",
+        "outputs": 3,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1450,
+        "y": 480,
+        "wires": [
+            [
+                "1f3be0f0cf23a955"
+            ],
+            [
+                "c301115701d2a789"
+            ],
+            [
+                "350dfce793e04058"
+            ]
+        ]
+    },
+    {
+        "id": "fd22aea86440924f",
+        "type": "debug",
+        "z": "49f8711fc297a8c1",
+        "name": "debug 6",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1160,
+        "y": 500,
+        "wires": []
+    },
+    {
+        "id": "350dfce793e04058",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "write interaction(upsert)",
+        "func": "const db = global.get(\"db\");\nif (!db) {\n  node.warn(\"Firestore not ready - skip interaction write\");\n  return msg;\n}\n\nconst interaction = msg.payload; // ✅ 여기!\nif (!interaction || !interaction.interaction_id) return msg;\n\ndb.collection(\"interactions\")\n  .doc(interaction.interaction_id)\n  .set(interaction, { merge: true })\n  .then(() => node.warn(`FS interaction upsert: ${interaction.interaction_id}`))\n  .catch(err => node.error(err));\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1810,
+        "y": 740,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "1c0f552d8a376fcc",
+        "type": "http request",
+        "z": "49f8711fc297a8c1",
+        "name": "",
+        "method": "use",
+        "ret": "bin",
+        "paytoqs": "ignore",
+        "url": "",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": false,
+        "headers": [],
+        "x": 1030,
+        "y": 860,
+        "wires": [
+            [
+                "04db854fab84c358"
+            ]
+        ]
+    },
+    {
+        "id": "04db854fab84c358",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "Voice: build whisper request",
+        "func": "const fs = global.get(\"fs\");\nconst path = global.get(\"path\");\nconst tempDir = global.get(\"tempDir\");\n\nif (!fs.existsSync(tempDir)) {\n  fs.mkdirSync(tempDir, { recursive: true });\n}\n\nconst filePath = path.join(\n  tempDir,\n  `tg_voice_${Date.now()}.oga`\n);\n\nfs.writeFileSync(filePath, msg.payload);\n\nmsg.voicePath = filePath;\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1320,
+        "y": 860,
+        "wires": [
+            [
+                "37ab14c5f1fb76e5"
+            ]
+        ]
+    },
+    {
+        "id": "8f2038d41f373286",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "Voice: build LLMReq for chat/completions",
+        "func": "const chatId = msg._tg?.chatId;\nconst interactionId = msg._interactionId;\nconst text = (msg.payload?.text || \"\").trim();\n\nif (!text) {\n  // 실패: 텔레그램 응답 + FS update로 보내고 끝내도 됨\n  msg.payload = { chatId, type:\"message\", content:\"🎙️ 음성을 인식하지 못했어요. 다시 말해 주세요.\", options:{} };\n  return [msg, null];\n}\n\n// ✅ 여기서부터는 Function1이 만들던 llmReq와 완전히 동일한 형태로 만들기\nmsg.headers = {\n  \"Content-Type\": \"application/json\",\n  \"Authorization\": `Bearer ${global.get(\"GMS_KEY\")}`\n};\n\nmsg.payload = {\n  model: \"gpt-4.1-nano\",\n  temperature: 0.2,\n  max_tokens: 200,\n  messages: [\n    {\n      role: \"system\",\n      content:\n        \"너는 AGV 사용자 앱의 명령 파서다. 반드시 JSON만 출력해.\\n\" +\n        \"허용 type: deliver_water, collect_cup, collect_laundry\\n\" +\n        \"허용 target_area: USER1, USER2, DOCK, BASE\\n\" +\n        '형식: {\"type\":\"...\",\"target_area\":\"...\",\"confidence\":0.0}\\n' +\n        \"추론 설명 금지. JSON 외 텍스트 금지.\"\n    },\n    { role: \"user\", content: text }\n  ]\n};\n\n// validate에서 쓰는 메타 유지\nmsg._tg = { chatId, raw: text };\nmsg._interactionId = interactionId;\n\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 2520,
+        "y": 860,
+        "wires": [
+            [
+                "54431a46252d1602"
+            ]
+        ]
+    },
+    {
+        "id": "f65016bb2f2505ba",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "Set Url",
+        "func": "// Voice: set url\nmsg.method = \"GET\";\nmsg.url = msg.weblink;              // ✅ 실제 값(https://api.telegram.org/...)이 들어감\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 810,
+        "y": 860,
+        "wires": [
+            [
+                "1c0f552d8a376fcc"
+            ]
+        ]
+    },
+    {
+        "id": "37ab14c5f1fb76e5",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "build exec cmd",
+        "func": "const fs = global.get(\"fs\");\nconst key = global.get(\"GMS_KEY\");\n\nif (!msg.voicePath) { node.error(\"voicePath missing\", msg); return null; }\nif (!fs.existsSync(msg.voicePath)) { node.error(\"voice file not found: \" + msg.voicePath, msg); return null; }\n\nconst boundary = \"----NodeRedFormBoundary\" + Date.now();\nconst CRLF = \"\\r\\n\";\n\n// 파일 읽기 (Buffer)\nconst fileBuf = fs.readFileSync(msg.voicePath);\n\n// multipart 파트들 만들기\nfunction partText(name, value) {\n  return Buffer.from(\n    `--${boundary}${CRLF}` +\n    `Content-Disposition: form-data; name=\"${name}\"${CRLF}${CRLF}` +\n    `${value}${CRLF}`\n  );\n}\n\nfunction partFile(name, filename, contentType, dataBuf) {\n  const head = Buffer.from(\n    `--${boundary}${CRLF}` +\n    `Content-Disposition: form-data; name=\"${name}\"; filename=\"${filename}\"${CRLF}` +\n    `Content-Type: ${contentType}${CRLF}${CRLF}`\n  );\n  const tail = Buffer.from(CRLF);\n  return Buffer.concat([head, dataBuf, tail]);\n}\n\nconst end = Buffer.from(`--${boundary}--${CRLF}`);\n\nconst body = Buffer.concat([\n  partText(\"model\", \"whisper-1\"),\n  partFile(\"file\", \"voice.oga\", \"audio/ogg\", fileBuf),\n  end\n]);\n\nmsg.method = \"POST\";\nmsg.url = \"https://gms.ssafy.io/gmsapi/api.openai.com/v1/audio/transcriptions\";\nmsg.headers = {\n  \"Authorization\": `Bearer ${key}`,\n  \"Content-Type\": `multipart/form-data; boundary=${boundary}`,\n  \"Content-Length\": body.length\n};\nmsg.payload = body;\n\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1620,
+        "y": 860,
+        "wires": [
+            [
+                "44fe72582d9db9b2"
+            ]
+        ]
+    },
+    {
+        "id": "996820a5df9eae6f",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "parse whisper result",
+        "func": "let obj = null;\ntry {\n  obj = JSON.parse(msg.payload);\n} catch (e) {\n  node.error(\"Whisper response not JSON\", msg);\n  return null;\n}\n\nconst text = (obj.text || \"\").trim();\nif (!text) {\n  msg.payload = { text: \"\" };\n  return msg;\n}\n\n// ------------------------------\n// ✅ 여기부터 추가: Firestore interaction 정리(clean-up)\n// - raw_input = STT 텍스트로 덮어쓰기\n// - meta(weblink 등) 삭제\n// ------------------------------\nconst db = global.get(\"db\");\nconst admin = global.get(\"admin\");        // global에 admin 올려둔 경우\nconst interactionId = msg._interactionId; // voice 파이프에서 유지 중인 값\n\nif (db && admin && interactionId) {\n  const FieldValue = admin.firestore.FieldValue;\n\n  db.collection(\"interactions\").doc(interactionId).set({\n    raw_input: text,                 // ✅ 정제된 텍스트로 교체\n    meta: FieldValue.delete(),       // ✅ meta 통째로 제거\n    updated_at: Date.now()\n  }, { merge: true })\n    .then(() => node.warn(`FS voice cleaned: ${interactionId}`))\n    .catch(err => node.error(err));\n} else {\n  node.warn(\"FS cleanup skipped (missing db/admin/interactionId)\");\n}\n\n// 다음 노드로 text 넘기기\nmsg.payload = { text };\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 2140,
+        "y": 860,
+        "wires": [
+            [
+                "8f2038d41f373286"
+            ]
+        ]
+    },
+    {
+        "id": "44fe72582d9db9b2",
+        "type": "http request",
+        "z": "49f8711fc297a8c1",
+        "name": "",
+        "method": "use",
+        "ret": "txt",
+        "paytoqs": "ignore",
+        "url": "",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": false,
+        "headers": [],
+        "x": 1870,
+        "y": 860,
+        "wires": [
+            [
+                "996820a5df9eae6f"
+            ]
+        ]
+    },
+    {
+        "id": "f0fa65d36b46ef73",
+        "type": "http in",
+        "z": "49f8711fc297a8c1",
+        "name": "GET /api/user/summary",
+        "url": "/api/user/summary",
+        "method": "get",
+        "upload": false,
+        "skipBodyParsing": false,
+        "swaggerDoc": "",
+        "x": 420,
+        "y": 2040,
+        "wires": [
+            [
+                "66ef6c3af246f209"
+            ]
+        ]
+    },
+    {
+        "id": "66ef6c3af246f209",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "buildUserSummaryResponse",
+        "func": "// GET /api/user/summary?user_id=tg_6802468707\n// - 자동 polling 금지(프론트에서 버튼 눌렀을 때만 호출)\n// - Firestore 읽기 없이 global(robots/taskQueue/taskStats) 기반으로 \"가볍게\" 응답\n\nconst q = msg.req?.query || {};\nconst userId = q.user_id || q.uid || null;\n\nif (!userId) {\n    msg.statusCode = 400;\n    msg.headers = { \"Content-Type\": \"application/json\" };\n    msg.payload = { error: \"missing user_id (ex: ?user_id=tg_6802468707)\" };\n    return msg;\n}\n\nconst robots = global.get(\"robots\") || {};\nconst taskQueue = global.get(\"taskQueue\") || [];\nconst taskStats = global.get(\"taskStats\") || {};\n\nconst r = robots[\"agv1\"] || null;\n\n// ---- labels\nconst AREA_LABEL = { BASE: \"베이스\", DOCK: \"도킹\", USER1: \"사용자 구역 1\", USER2: \"사용자 구역 2\" };\nconst TYPE_LABEL = { deliver_water: \"☕ 물 배달\", collect_cup: \"🥤 컵 회수\", collect_laundry: \"🧹 환경 정리\" };\n\nfunction areaName(a) { return AREA_LABEL[a] || a || \"—\"; }\nfunction typeName(t) { return TYPE_LABEL[t] || t || \"—\"; }\n\n// ---- expected duration defaults (ms)\nconst DEFAULT_EXPECT_MS = {\n    deliver_water: 20000,\n    collect_cup: 15000,\n    collect_laundry: 30000\n};\n\n// EMA가 있으면 그걸 우선 사용\nfunction expectedMsFor(type) {\n    const ema = taskStats?.[type]?.ema_ms;\n    if (ema != null) return Math.max(1000, Math.round(ema)); // 최소 1초\n    return DEFAULT_EXPECT_MS[type] || 20000;\n}\n\n// ---- KST 범위 계산 (오늘/주간)\nfunction startOfKstDay(ts = Date.now()) {\n    const k = new Date(ts + 9 * 3600 * 1000);\n    k.setUTCHours(0, 0, 0, 0);\n    return k.getTime() - 9 * 3600 * 1000;\n}\nfunction startOfKstWeek(ts = Date.now()) {\n    const k = new Date(ts + 9 * 3600 * 1000);\n    const day = k.getUTCDay(); // 0=Sun\n    const diff = (day === 0 ? 6 : day - 1); // Mon=0 기준\n    k.setUTCDate(k.getUTCDate() - diff);\n    k.setUTCHours(0, 0, 0, 0);\n    return k.getTime() - 9 * 3600 * 1000;\n}\n\nconst now = Date.now();\nconst dayStart = startOfKstDay(now);\nconst weekStart = startOfKstWeek(now);\n\n// ---- \"내 작업\"만 필터\nconst myTasks = taskQueue.filter(t => (t.user_id === userId));\n\n// ---- 진행중 작업 선정 우선순위\n// 1) agv1이 들고 있는 task_id(내 작업이면)\n// 2) 내 작업 중 running\n// 3) 내 작업 중 pending 최신\nlet active = null;\n\nif (r?.task_id) {\n    active = myTasks.find(t => t.task_id === r.task_id) || null;\n}\nif (!active) {\n    active = myTasks.find(t => t.status === \"running\") || null;\n}\nif (!active) {\n    const pendings = myTasks.filter(t => t.status === \"pending\");\n    pendings.sort((a, b) => (Number(b.created_at || 0) - Number(a.created_at || 0)));\n    active = pendings[0] || null;\n}\n\n// ---- ETA 계산(초)\nfunction etaRemainSec(task) {\n    if (!task) return null;\n\n    const expectedMs = Number(task.expected_duration_ms || 0) || expectedMsFor(task.type);\n    const startedAt = Number(task.started_at || 0);\n    const createdAt = Number(task.created_at || 0);\n\n    // running이면 started_at 기준으로 감소, 아니면 expected만 표시\n    if ((task.status === \"running\") && (startedAt > 0)) {\n        const elapsed = now - startedAt;\n        return Math.max(0, Math.ceil((expectedMs - elapsed) / 1000));\n    }\n\n    // 아직 running 전이면 \"예상값\"만\n    if (expectedMs > 0 && (createdAt > 0 || startedAt > 0)) {\n        return Math.max(0, Math.ceil(expectedMs / 1000));\n    }\n    return null;\n}\n\n// ---- 상태 라벨\nfunction robotStateLabel(robot) {\n    if (!robot) return \"상태 없음\";\n    const s = String(robot.state || \"unknown\").toLowerCase();\n    if (robot.error_code) return \"오류 ❗\";\n    if (s === \"running\") return \"이동 중 🚚\";\n    if (s === \"charging\") return \"충전 중 🔌\";\n    if (s === \"idle\") return \"대기 중 ✅\";\n    return s;\n}\n\nconst nowObj = {\n    state_label: robotStateLabel(r),\n    battery: r?.battery ?? null,\n    area_label: r?.area ? areaName(r.area) : null,\n    error_label: r?.error_code ?? null,\n    active: active ? {\n        type: active.type || null,\n        type_label: typeName(active.type),\n        target_area: active.target_area || null,\n        target_label: areaName(active.target_area),\n        status: active.status || null,\n        eta_remain_sec: etaRemainSec(active)\n    } : null\n};\n\n// ---- 오늘/주간 집계\nfunction countRange(startMs) {\n    const c = { deliver_water: 0, collect_cup: 0, collect_laundry: 0 };\n    for (const t of myTasks) {\n        const ts = Number(t.created_at || 0);\n        if (!ts || ts < startMs) continue;\n        if (t.type && (t.type in c)) c[t.type]++;\n    }\n    return c;\n}\n\nconst todayCnt = countRange(dayStart);\nconst weekCnt = countRange(weekStart);\n\n// 물 ml 환산(발표용 가정치)\nconst PER_WATER_ML = 500;\nconst todayWater = todayCnt.deliver_water * PER_WATER_ML;\nconst weekWater = weekCnt.deliver_water * PER_WATER_ML;\n\nfunction topType(cnt) {\n    let best = null, bestV = -1;\n    for (const k of Object.keys(cnt)) {\n        if (cnt[k] > bestV) { bestV = cnt[k]; best = k; }\n    }\n    return bestV > 0 ? best : null;\n}\n\n// ---- 최근 요청 5개\nconst recent = [...myTasks]\n    .sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0))\n    .slice(0, 5)\n    .map(t => ({\n        ts: Number(t.created_at || 0),\n        type: t.type || null,\n        type_label: typeName(t.type),\n        target_area: t.target_area || null,\n        target_label: areaName(t.target_area),\n        status: t.status || \"unknown\"\n    }));\n\nmsg.statusCode = 200;\nmsg.headers = { \"Content-Type\": \"application/json\" };\nmsg.payload = {\n    user_id: userId,\n    now: nowObj,\n    today: { ...todayCnt, water_ml: todayWater },\n    week: { ...weekCnt, water_ml: weekWater, top: topType(weekCnt) },\n    recent,\n    updated_at: now\n};\n\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 700,
+        "y": 2040,
+        "wires": [
+            [
+                "48b24095339e8f46"
+            ]
+        ]
+    },
+    {
+        "id": "48b24095339e8f46",
+        "type": "http response",
+        "z": "49f8711fc297a8c1",
+        "name": "res /api/user/summary",
+        "statusCode": "",
+        "headers": {},
+        "x": 1000,
+        "y": 2040,
+        "wires": []
+    },
+    {
+        "id": "fc7132a95c44fe84",
+        "type": "debug",
+        "z": "49f8711fc297a8c1",
+        "name": "debug 7",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1620,
+        "y": 1200,
+        "wires": []
+    },
+    {
+        "id": "ce111f86ccf22e93",
+        "type": "debug",
+        "z": "49f8711fc297a8c1",
+        "name": "debug 8",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1300,
+        "y": 1200,
+        "wires": []
+    },
+    {
+        "id": "4ec68c37f9405b30",
+        "type": "http in",
+        "z": "49f8711fc297a8c1",
+        "name": "GET /api/user/brief",
+        "url": "/api/user/brief",
+        "method": "get",
+        "upload": false,
+        "skipBodyParsing": false,
+        "swaggerDoc": "",
+        "x": 410,
+        "y": 2120,
+        "wires": [
+            [
+                "642ff654d947d271"
+            ]
+        ]
+    },
+    {
+        "id": "a6d2592241f69718",
+        "type": "http response",
+        "z": "49f8711fc297a8c1",
+        "name": "",
+        "statusCode": "",
+        "headers": {},
+        "x": 1590,
+        "y": 2120,
+        "wires": []
+    },
+    {
+        "id": "642ff654d947d271",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "BRIEF: build + firestore aggregate",
+        "func": "// BRIEF: build + firestore aggregate\n// - Outputs: 2\n//   (1) OpenAI 호출로 보낼 msg\n//   (2) 캐시 히트 시 즉시 HTTP Response로 보낼 msg\n\nconst db = global.get(\"db\");\nlet GMS_KEY =\n  global.get(\"GMS_KEY\") ||\n  global.get(\"OPENAI_API_KEY\") ||\n  global.get(\"OPENAI_KEY\") ||\n  ((typeof env !== \"undefined\" && env.get) ? env.get(\"GMS_KEY\") : null);\n\nif (typeof GMS_KEY === \"string\" && GMS_KEY.startsWith(\"Bearer \")) {\n  GMS_KEY = GMS_KEY.slice(\"Bearer \".length);\n}\n\n\nfunction toMs(v) {\n  if (!v) return 0;\n  if (typeof v === \"number\") return v;\n  if (typeof v === \"string\") {\n    const n = Number(v);\n    if (Number.isFinite(n)) return n;\n    const d = Date.parse(v);\n    return Number.isFinite(d) ? d : 0;\n  }\n  if (typeof v === \"object\") {\n    if (typeof v.toMillis === \"function\") return v.toMillis();       // Firestore Timestamp\n    if (typeof v.seconds === \"number\") return v.seconds * 1000;       // {seconds, nanoseconds}\n  }\n  return 0;\n}\n\nfunction startOfTodayMs() {\n  const d = new Date();\n  d.setHours(0, 0, 0, 0);\n  return d.getTime();\n}\n\nfunction startOfThisWeekMsMonday() {\n  // 월요일 00:00 시작(로컬)\n  const d = new Date();\n  const day = d.getDay(); // 0=일 ... 1=월 ... 6=토\n  const diffToMon = (day + 6) % 7; // 월=0, 화=1 ... 일=6\n  d.setDate(d.getDate() - diffToMon);\n  d.setHours(0, 0, 0, 0);\n  return d.getTime();\n}\n\nfunction dayLabelMon0(idx) {\n  // chartLabel과 맞추는 느낌(월~일)\n  const arr = [\"월\", \"화\", \"수\", \"목\", \"금\", \"토\", \"일\"];\n  return arr[idx] || String(idx);\n}\n\nreturn (async () => {\n  if (!db) {\n    const out = {\n      statusCode: 500,\n      payload: { message: \"Firestore not initialized (global.db is missing)\" },\n    };\n    out.req = msg.req;\n    out.res = msg.res;\n    return [null, out];\n  }\n  if (!GMS_KEY) {\n    const out = {\n      statusCode: 503,\n      payload: { message: \"GMS_KEY is missing\" },\n    };\n    out.req = msg.req;\n    out.res = msg.res;\n    return [null, out];\n  }\n\n  const q = msg.req?.query || {};\n  const range = String(q.range || \"day\").toLowerCase() === \"week\" ? \"week\" : \"day\";\n  const refresh = String(q.refresh || \"0\") === \"1\";\n\n  // ----- 서버 캐시 -----\n  const now = Date.now();\n  const ttlMs = range === \"week\" ? 60 * 60 * 1000 : 10 * 60 * 1000; // week=1h, day=10m\n  const cache = global.get(\"briefCache\") || {};\n  const hit = cache[range];\n\n  if (!refresh && hit?.brief && hit?.ts && (now - hit.ts) < ttlMs) {\n    const out = {\n      statusCode: 200,\n      headers: { \"Content-Type\": \"application/json\" },\n      payload: {\n        range,\n        cached: true,\n        generated_at: hit.ts,\n        brief: hit.brief,\n        stats: hit.stats || null,\n        ttl_ms: ttlMs,\n      },\n    };\n    out.req = msg.req;\n    out.res = msg.res;\n    return [null, out];\n  }\n\n  // ----- 기간 계산 -----\n  const sinceMs = (range === \"week\") ? startOfThisWeekMsMonday() : startOfTodayMs();\n  const rangeName = (range === \"week\") ? \"이번 주\" : \"오늘\";\n\n  // ----- Firestore에서 최근 N개 가져와서 기간 필터 -----\n  // (인덱스 최소화용: created_at desc limit)\n  let docs = [];\n  try {\n    const snap = await db.collection(\"tasks\")\n      .orderBy(\"created_at\", \"desc\")\n      .limit(600)\n      .get();\n    docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));\n  } catch (e) {\n    const out = {\n      statusCode: 500,\n      payload: { message: \"Firestore query failed\", error: String(e?.message || e) },\n    };\n    out.req = msg.req;\n    out.res = msg.res;\n    return [null, out];\n  }\n\n  const tasks = docs\n    .map(t => {\n      const created = toMs(t.created_at);\n      const started = toMs(t.started_at);\n      const finished = toMs(t.finished_at);\n\n      // duration 계산(없으면 0)\n      let duration_s = 0;\n      if (started && finished && finished >= started) duration_s = Math.round((finished - started) / 1000);\n      else if (t.duration_s) duration_s = Number(t.duration_s) || 0;\n\n      return {\n        ...t,\n        _created_ms: created,\n        _duration_s: duration_s,\n        _status: String(t.status || \"\").toLowerCase(),\n        _type: String(t.type || \"\"),\n      };\n    })\n    .filter(t => t._created_ms >= sinceMs);\n\n  const total = tasks.length;\n  const doneTasks = tasks.filter(t => t._status === \"done\");\n  const done = doneTasks.length;\n\n  // 타입별\n  const countByType = {};\n  for (const t of tasks) {\n    countByType[t._type] = (countByType[t._type] || 0) + 1;\n  }\n\n  // 물/정리 지표(너 프로젝트 기준)\n  const waterCount = countByType[\"deliver_water\"] || 0;\n  const laundryCount = countByType[\"collect_laundry\"] || 0;\n  const cupCount = countByType[\"collect_cup\"] || 0;\n\n  const waterCupMl = 250;\n  const waterMl = waterCount * waterCupMl;\n\n  // 평균 소요\n  const durations = doneTasks.map(t => t._duration_s).filter(n => Number.isFinite(n) && n > 0);\n  const avgDurationS = durations.length ? Math.round(durations.reduce((a,b)=>a+b,0) / durations.length) : 0;\n\n  // 패턴(피크)\n  let peakText = \"데이터가 아직 적어서 패턴을 보기 어려워요.\";\n  if (total > 0) {\n    if (range === \"day\") {\n      const buckets = Array(24).fill(0);\n      for (const t of tasks) {\n        const h = new Date(t._created_ms).getHours();\n        buckets[h]++;\n      }\n      const mx = Math.max(...buckets);\n      const idx = buckets.indexOf(mx);\n      if (mx > 0) peakText = `${idx}시대에 요청이 가장 몰렸어요.`;\n    } else {\n      const buckets = Array(7).fill(0); // 월=0~일=6\n      for (const t of tasks) {\n        const d = new Date(t._created_ms).getDay(); // 0=일..6=토\n        const mon0 = (d + 6) % 7;\n        buckets[mon0]++;\n      }\n      const mx = Math.max(...buckets);\n      const idx = buckets.indexOf(mx);\n      if (mx > 0) peakText = `${dayLabelMon0(idx)}요일에 요청이 가장 많았어요.`;\n    }\n  }\n\n  // 최근 3개(기간 내)\n  const recent3 = tasks\n    .slice()\n    .sort((a,b) => b._created_ms - a._created_ms)\n    .slice(0, 3)\n    .map(t => ({\n      type: t._type,\n      status: t._status,\n      area: t.target_area || null,\n      created_at: t._created_ms,\n      duration_s: t._duration_s,\n    }));\n\n  const pct = total ? Math.round((done / total) * 100) : 0;\n\n  const stats = {\n    range,\n    since_ms: sinceMs,\n    total,\n    done,\n    done_pct: pct,\n    avg_duration_s: avgDurationS,\n    by_type: countByType,\n    water_count: waterCount,\n    water_ml: waterMl,\n    laundry_count: laundryCount,\n    cup_count: cupCount,\n    peak: peakText,\n    recent3,\n  };\n\n  // ----- LLM 프롬프트(사용자 친화 + 가치 중심, 운영자 톤 금지) -----\n  const prompt = `\n너는 사용자를 위한 \"짧고 유용한 생활 브리핑\"을 작성한다.\n운영자/관리자 관점(요청 처리, 완료 보고서 톤) 금지. 사용자가 얻는 가치(습관/컨디션/생활 리듬)를 중심으로 말해라.\n의학적 조언/진단 금지(가볍게 권장만).\n\n[기간] ${rangeName}\n[집계]\n- 총 요청: ${total}건, 완료: ${done}건(완료율 ${pct}%)\n- 평균 소요(완료건): ${avgDurationS}s\n- 물 배달: ${waterCount}회 (추정 섭취 ${waterMl}ml, 1회=${waterCupMl}ml 가정)\n- 환경 정리(collect_laundry): ${laundryCount}회\n- 컵 수거(collect_cup): ${cupCount}회\n- 패턴: ${peakText}\n- 최근 요청 3개: ${JSON.stringify(recent3)}\n\n[출력 형식] 아래 5줄을 정확히 지켜라(각 줄은 이모지로 시작)\n🧾 한줄요약: ...\n💧 물/컨디션: ...\n🧹 정리/생활: ...\n⏱️ 패턴: ...\n✅ 오늘(또는 이번 주) 추천 1가지: ...\n`.trim();\n\n  const body = {\n    model: \"gpt-4.1-nano\",\n    max_completion_tokens: 220,\n    messages: [\n      { role: \"developer\", content: \"Answer in Korean.\" },\n      { role: \"user\", content: prompt },\n    ],\n  };\n\n  msg.headers = {\n    \"Content-Type\": \"application/json\",\n    \"Authorization\": `Bearer ${GMS_KEY}`,\n  };\n  msg.payload = JSON.stringify(body);\n\n  // parse 노드에서 캐시 저장용으로 넘김\n  msg._brief_meta = { range, ttlMs, stats };\n\n  return [msg, null];\n})().catch((e) => {\n  const out = {\n    statusCode: 500,\n    payload: { message: \"BRIEF build failed\", error: String(e?.message || e) },\n  };\n  out.req = msg.req;\n  out.res = msg.res;\n  return [null, out];\n});",
+        "outputs": 2,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 760,
+        "y": 2120,
+        "wires": [
+            [
+                "5290db53cf0d5b80"
+            ],
+            [
+                "a6d2592241f69718"
+            ]
+        ]
+    },
+    {
+        "id": "5290db53cf0d5b80",
+        "type": "http request",
+        "z": "49f8711fc297a8c1",
+        "name": "",
+        "method": "POST",
+        "ret": "obj",
+        "paytoqs": "ignore",
+        "url": "https://gms.ssafy.io/gmsapi/api.openai.com/v1/chat/completions",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": false,
+        "headers": [],
+        "x": 1050,
+        "y": 2120,
+        "wires": [
+            [
+                "0199749053698397",
+                "e003202d2963564d"
+            ]
+        ]
+    },
+    {
+        "id": "0199749053698397",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "BRIEF: parse + respond",
+        "func": "// // BRIEF: parse + respond\n// // - OpenAI 응답 파싱\n// // - 서버 캐시 저장(global.briefCache)\n// // - 최종 HTTP Response payload 생성\n\n// const meta = msg._brief_meta || {};\n// const range = meta.range || \"day\";\n// const ttlMs = meta.ttlMs || 0;\n// const stats = meta.stats || null;\n\n// function fallbackBrief() {\n//   const rangeName = range === \"week\" ? \"이번 주\" : \"오늘\";\n//   const total = stats?.total ?? 0;\n//   const done = stats?.done ?? 0;\n//   const pct = stats?.done_pct ?? 0;\n//   const waterMl = stats?.water_ml ?? 0;\n//   const waterCount = stats?.water_count ?? 0;\n//   const laundryCount = stats?.laundry_count ?? 0;\n//   const peak = stats?.peak || \"아직 패턴을 보기엔 데이터가 부족해요.\";\n\n//   return [\n//     `🧾 한줄요약: ${rangeName}엔 ${total}번 도움을 요청했고, ${done}번 처리됐어요(완료율 ${pct}%).`,\n//     `💧 물/컨디션: 물 배달 ${waterCount}회 → 대략 ${waterMl}ml 마신 셈이에요.`,\n//     `🧹 정리/생활: 환경 정리 ${laundryCount}회로 생활 공간을 잘 유지했어요.`,\n//     `⏱️ 패턴: ${peak}`,\n//     `✅ ${rangeName} 추천 1가지: 물 한 번 더 챙기거나, 자주 쓰는 구역 정리를 루틴으로 고정해봐요.`,\n//   ].join(\"\\n\");\n// }\n\n// let brief = \"\";\n// try {\n//   const data = (typeof msg.payload === \"string\") ? JSON.parse(msg.payload) : msg.payload;\n//   brief = String(data?.choices?.[0]?.message?.content || \"\").trim();\n// } catch {\n//   brief = \"\";\n// }\n\n// if (!brief) brief = fallbackBrief();\n\n// // ---- 서버 캐시 저장 ----\n// try {\n//   const cache = global.get(\"briefCache\") || {};\n//   cache[range] = { ts: Date.now(), brief, stats };\n//   global.set(\"briefCache\", cache);\n// } catch {}\n\n// // ---- response ----\n// msg.statusCode = 200;\n// msg.headers = { \"Content-Type\": \"application/json\" };\n// msg.payload = {\n//   range,\n//   cached: false,\n//   generated_at: Date.now(),\n//   ttl_ms: ttlMs,\n//   brief,\n//   stats,\n// };\n\n// return msg;\n// BRIEF: parse + respond\n// - OpenAI 응답 파싱\n// - 서버 캐시 저장(global.briefCache)\n// - 최종 HTTP Response payload 생성\n\nconst meta = msg._brief_meta || {};\nconst range = meta.range || \"day\";\nconst ttlMs = meta.ttlMs || 0;\nconst stats = meta.stats || null;\n\nfunction fallbackBrief() {\n  const rangeName = range === \"week\" ? \"이번 주\" : \"오늘\";\n  const total = stats?.total ?? 0;\n  const done = stats?.done ?? 0;\n  const pct = stats?.done_pct ?? 0;\n  const waterMl = stats?.water_ml ?? 0;\n  const waterCount = stats?.water_count ?? 0;\n  const laundryCount = stats?.laundry_count ?? 0;\n  const peak = stats?.peak || \"아직 패턴을 보기엔 데이터가 부족해요.\";\n\n  return [\n    `🧾 한줄요약: ${rangeName}엔 ${total}번 도움을 요청했고, ${done}번 처리됐어요(완료율 ${pct}%).`,\n    `💧 물/컨디션: 물 배달 ${waterCount}회 → 대략 ${waterMl}ml 마신 셈이에요.`,\n    `🧹 정리/생활: 환경 정리 ${laundryCount}회로 생활 공간을 잘 유지했어요.`,\n    `⏱️ 패턴: ${peak}`,\n    `✅ ${rangeName} 추천 1가지: 물 한 번 더 챙기거나, 자주 쓰는 구역 정리를 루틴으로 고정해봐요.`,\n  ].join(\"\\n\");\n}\n\n// ✅ 여기 추가: 이모지(🧾💧🧹⏱️✅)가 나오면 무조건 \"줄 시작\"으로 정렬\nfunction normalizeBrief(raw) {\n  if (!raw) return \"\";\n\n  let s = String(raw)\n    .replace(/\\r\\n/g, \"\\n\")\n    .replace(/\\r/g, \"\\n\")\n    .trim();\n\n  // 이모지 마커(⏱️는 변형(⏱)도 잡아줌)\n  // 마커 앞에 무조건 개행을 넣고, 중복 개행은 하나로 정리\n  s = s.replace(/(🧾|💧|🧹|⏱️|⏱|✅)/g, \"\\n$1\");\n\n  // 앞쪽 불필요 개행 제거 + 공백 정리\n  s = s.replace(/^\\n+/, \"\");\n  s = s.replace(/\\n[ \\t]+/g, \"\\n\");\n  s = s.replace(/[ \\t]+\\n/g, \"\\n\");\n\n  // 개행이 여러 개 생기면 1개로\n  s = s.replace(/\\n{2,}/g, \"\\n\").trim();\n\n  return s;\n}\n\nlet brief = \"\";\ntry {\n  const data = (typeof msg.payload === \"string\") ? JSON.parse(msg.payload) : msg.payload;\n  brief = String(data?.choices?.[0]?.message?.content || \"\").trim();\n} catch {\n  brief = \"\";\n}\n\nif (!brief) brief = fallbackBrief();\n\n// ✅ 강제 정렬\nbrief = normalizeBrief(brief);\n\n// ---- 서버 캐시 저장 ----\ntry {\n  const cache = global.get(\"briefCache\") || {};\n  cache[range] = { ts: Date.now(), brief, stats };\n  global.set(\"briefCache\", cache);\n} catch {}\n\n// ---- response ----\nmsg.statusCode = 200;\nmsg.headers = { \"Content-Type\": \"application/json\" };\nmsg.payload = {\n  range,\n  cached: false,\n  generated_at: Date.now(),\n  ttl_ms: ttlMs,\n  brief,\n  stats,\n};\n\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1330,
+        "y": 2120,
+        "wires": [
+            [
+                "a6d2592241f69718"
+            ]
+        ]
+    },
+    {
+        "id": "e003202d2963564d",
+        "type": "debug",
+        "z": "49f8711fc297a8c1",
+        "name": "debug 9",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1200,
+        "y": 2180,
+        "wires": []
+    },
+    {
+        "id": "196ad6fd54f9c6b6",
+        "type": "http in",
+        "z": "49f8711fc297a8c1",
+        "name": "GET /api/app/settings",
+        "url": "/api/app/settings",
+        "method": "get",
+        "upload": false,
+        "skipBodyParsing": false,
+        "swaggerDoc": "",
+        "x": 420,
+        "y": 2300,
+        "wires": [
+            [
+                "9e4d823bea057f41"
+            ]
+        ]
+    },
+    {
+        "id": "9e4d823bea057f41",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "GET /api/app/settings function",
+        "func": "// // GET /api/app/settings\n// // Firestore 전역 설정 문서에서 가져오기\n\n// const db =\n//   global.get(\"db\") ||\n//   global.get(\"firestore\") ||\n//   global.get(\"fsdb\");\n\n// if (!db) {\n//   msg.statusCode = 500;\n//   msg.payload = { ok: false, error: \"Firestore db not found in global context\" };\n//   return msg;\n// }\n\n// return (async () => {\n//   const ref = db.collection(\"app_config\").doc(\"global\"); // ✅ 전역 1문서\n//   const snap = await ref.get();\n\n//   msg.statusCode = 200;\n//   global.set(\"appSettings\", settings);\n//   msg.payload = { ok: true, settings: snap.exists ? snap.data() : null };\n//   return msg;\n// })().catch((e) => {\n//   msg.statusCode = 500;\n//   msg.payload = { ok: false, error: String(e) };\n//   return msg;\n// });\n\n// GET /api/app/settings function\nconst db = global.get(\"db\") || global.get(\"firestore\") || global.get(\"fsdb\");\nif (!db) {\n  msg.statusCode = 503;\n  msg.payload = { ok: false, error: \"Firestore not ready\" };\n  return msg;\n}\n\nreturn (async () => {\n  const snap = await db.collection(\"app_config\").doc(\"global\").get();\n  const data = snap.exists ? (snap.data() || {}) : null;\n\n  // ✅ 전역 캐시 (undefined 변수 쓰지 말 것)\n  global.set(\"appSettings\", data || null);\n\n  msg.statusCode = 200;\n  msg.payload = { ok: true, settings: data || null };\n  return msg;\n})().catch((err) => {\n  node.error(err);\n  msg.statusCode = 500;\n  msg.payload = { ok: false, error: String(err?.message || err) };\n  return msg;\n});\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 710,
+        "y": 2300,
+        "wires": [
+            [
+                "92e58e87bb22bc94"
+            ]
+        ]
+    },
+    {
+        "id": "92e58e87bb22bc94",
+        "type": "http response",
+        "z": "49f8711fc297a8c1",
+        "name": "res /api/app/settings",
+        "statusCode": "",
+        "headers": {},
+        "x": 1000,
+        "y": 2300,
+        "wires": []
+    },
+    {
+        "id": "cd4ac22d736413b0",
+        "type": "http in",
+        "z": "49f8711fc297a8c1",
+        "name": "POST /api/app/settings",
+        "url": "/api/app/settings",
+        "method": "post",
+        "upload": false,
+        "skipBodyParsing": false,
+        "swaggerDoc": "",
+        "x": 420,
+        "y": 2400,
+        "wires": [
+            [
+                "3afe60812ab7ff80"
+            ]
+        ]
+    },
+    {
+        "id": "3afe60812ab7ff80",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "POST /api/app/settings function",
+        "func": "// // POST /api/app/settings\n// // body: { settings: {...} }\n\n// const db =\n//   global.get(\"db\") ||\n//   global.get(\"firestore\") ||\n//   global.get(\"fsdb\");\n\n// if (!db) {\n//   msg.statusCode = 500;\n//   msg.payload = { ok: false, error: \"Firestore db not found in global context\" };\n//   return msg;\n// }\n\n// const settings = msg.payload?.settings;\n// if (!settings || typeof settings !== \"object\") {\n//   msg.statusCode = 400;\n//   msg.payload = { ok: false, error: \"settings object required\" };\n//   return msg;\n// }\n\n// // ✅ 화이트리스트로 안전하게 저장(원하는 것만)\n// const clean = {\n//   user_place: String(settings.user_place || \"RES_A\"),\n//   water_goal_ml: Number(settings.water_goal_ml || 0) || 0,\n//   routines: Array.isArray(settings.routines) ? settings.routines : [],\n//   updated_at: Date.now(),\n// };\n\n// return (async () => {\n//   await db.collection(\"app_config\").doc(\"global\").set(clean, { merge: true });\n//   global.set(\"appSettings\", setData);\n//   msg.statusCode = 200;\n//   msg.payload = { ok: true };\n//   return msg;\n// })().catch((e) => {\n//   msg.statusCode = 500;\n//   msg.payload = { ok: false, error: String(e) };\n//   return msg;\n// });\n\n\n// POST /api/app/settings function\nconst db = global.get(\"db\") || global.get(\"firestore\") || global.get(\"fsdb\");\nif (!db) {\n  msg.statusCode = 503;\n  msg.payload = { ok: false, error: \"Firestore not ready\" };\n  return msg;\n}\n\n// body 파싱 (string/json 모두 대응)\nlet body = msg.payload;\nif (typeof body === \"string\") {\n  try { body = JSON.parse(body); } catch (e) { }\n}\n\nconst settingsIn = body?.settings;\nif (!settingsIn || typeof settingsIn !== \"object\") {\n  msg.statusCode = 400;\n  msg.payload = { ok: false, error: \"Invalid body: { settings: {...} } required\" };\n  return msg;\n}\n\n// 루틴 sanitize\nfunction normTimeHHMM(t) {\n  if (!t) return \"00:00\";\n  const s = String(t).trim();\n  // \"HH:MM\"\n  if (/^\\d{2}:\\d{2}$/.test(s)) return s;\n  // \"H:MM\" -> \"0H:MM\"\n  if (/^\\d{1}:\\d{2}$/.test(s)) return \"0\" + s;\n  // \"HHMM\"\n  if (/^\\d{4}$/.test(s)) return s.slice(0, 2) + \":\" + s.slice(2);\n  return s.slice(0, 5);\n}\n\nfunction cleanRoutine(r) {\n  const rr = r && typeof r === \"object\" ? r : {};\n  return {\n    id: String(rr.id || `rt_${Date.now()}`),\n    enabled: rr.enabled !== false,\n    time: normTimeHHMM(rr.time),\n    repeat: rr.repeat === \"weekly\" ? \"weekly\" : \"daily\",\n    days: Array.isArray(rr.days) ? rr.days : [],\n    action_type: String(rr.action_type || rr.type || \"deliver_water\"),\n    target_mode: rr.target_mode === \"custom\" ? \"custom\" : \"my\",\n    target_area: String(rr.target_area || rr.area || \"\"),\n    created_at: Number(rr.created_at || Date.now()),\n  };\n}\n\nconst clean = {\n  // 필요한 것들만 확실히 보존\n  user_place: String(settingsIn.user_place || \"RES_A\"),\n  water_goal_ml: Number(settingsIn.water_goal_ml || 0) || 0,\n  routines: Array.isArray(settingsIn.routines) ? settingsIn.routines.map(cleanRoutine) : [],\n  updated_at: Date.now(),\n};\n\nreturn (async () => {\n  await db.collection(\"app_config\").doc(\"global\").set(clean, { merge: true });\n\n  // ✅ 전역 캐시 업데이트 (undefined setData 금지)\n  global.set(\"appSettings\", clean);\n\n  msg.statusCode = 200;\n  msg.payload = { ok: true };\n  return msg;\n})().catch((err) => {\n  node.error(err);\n  msg.statusCode = 500;\n  msg.payload = { ok: false, error: String(err?.message || err) };\n  return msg;\n});\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 710,
+        "y": 2400,
+        "wires": [
+            [
+                "a4f359686768196d"
+            ]
+        ]
+    },
+    {
+        "id": "a4f359686768196d",
+        "type": "http response",
+        "z": "49f8711fc297a8c1",
+        "name": "res /api/app/settings",
+        "statusCode": "",
+        "headers": {},
+        "x": 1000,
+        "y": 2400,
+        "wires": []
+    },
+    {
+        "id": "6f9693cf9fc68603",
+        "type": "inject",
+        "z": "49f8711fc297a8c1",
+        "name": "TICK (Routine Scheduler)",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "5",
+        "crontab": "",
+        "once": true,
+        "onceDelay": "5",
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 440,
+        "y": 2560,
+        "wires": [
+            [
+                "8808fa070f001f8e"
+            ]
+        ]
+    },
+    {
+        "id": "8808fa070f001f8e",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "Routine Scheduler -> create msg.task",
+        "func": "// /**\n//  * Routine Scheduler -> create msg.task\n//  * Fixes:\n//  * 1. KST Timezone 적용 (UTC+9)\n//  * 2. global.taskQueue에 push (실제 실행을 위해)\n//  * 3. node.send() 방식 사용 (안정성)\n//  */\n\n// function pad2(n) { return String(n).padStart(2, \"0\"); }\n\n// // KST 기준 현재 시간 객체 반환\n// function getKSTDate() {\n//   const now = new Date();\n//   const utc = now.getTime() + (now.getTimezoneOffset() * 60000);\n//   const kstGap = 9 * 60 * 60 * 1000;\n//   return new Date(utc + kstGap);\n// }\n\n// function pickTimeStr(r) {\n//   const t = r.time ?? r.hhmm ?? r.at ?? r.run_at ?? r.when;\n//   if (!t) return null;\n//   if (typeof t === \"string\") {\n//     const s = t.trim();\n//     if (/^\\d{2}:\\d{2}$/.test(s)) return s;\n//     if (/^\\d{4}$/.test(s)) return s.slice(0, 2) + \":\" + s.slice(2, 4);\n//     return null;\n//   }\n//   if (typeof t === \"object\") {\n//     const hh = t.hh ?? t.hour;\n//     const mm = t.mm ?? t.minute;\n//     if (hh == null || mm == null) return null;\n//     return pad2(hh) + \":\" + pad2(mm);\n//   }\n//   return null;\n// }\n\n// function getIsoDow(jsDow) { return jsDow === 0 ? 7 : jsDow; } // Sun=0->7\n\n// function normalizeDays(days) {\n//   if (!Array.isArray(days) || days.length === 0) return null;\n//   const out = [];\n//   for (const d of days) {\n//     if (typeof d === \"number\" && Number.isFinite(d)) out.push(d);\n//     else if (typeof d === \"string\") {\n//       const s = d.trim().toLowerCase();\n//       const map = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };\n//       if (s in map) out.push(map[s]);\n//       else if (/^\\d+$/.test(s)) out.push(Number(s));\n//     }\n//   }\n//   return out.length ? out : null;\n// }\n\n// function matchDow(r, kstDate) {\n//   const jsDow = kstDate.getDay();      // 0(Sun)..6(Sat) (KST 기준)\n//   const isoDow = getIsoDow(jsDow);     // 1(Mon)..7(Sun)\n\n//   const daysRaw = r.days ?? r.dow ?? r.daysOfWeek ?? r.weekdays;\n//   const days = normalizeDays(daysRaw);\n//   if (!days) return true; // 요일 설정 없으면 매일\n\n//   const has0 = days.includes(0);\n//   const has7 = days.includes(7);\n//   const looksIso = !has0 && (has7 || days.some(x => x >= 1 && x <= 7));\n\n//   if (looksIso) return days.includes(isoDow);\n//   return days.includes(jsDow);\n// }\n\n// function sanitizeId(s) {\n//   return String(s ?? \"\").trim().replace(/[^a-zA-Z0-9_-]/g, \"_\").slice(0, 60);\n// }\n\n// // 예상 소요시간 기본값\n// const baseMsMap = {\n//   water: 20000, drop: 15000, charge: 25000, wash: 20000, cancel: 3000, unknown: 20000\n// };\n\n// // 메인 로직 시작\n// (async () => {\n//   const db = global.get(\"db\") || global.get(\"fs\") || global.get(\"firestore\");\n//   if (!db) {\n//     node.status({ fill: \"red\", shape: \"ring\", text: \"Firestore not ready\" });\n//     // DB 없으면 종료\n//     return;\n//   }\n\n//   // 1) routines 가져오기 (global cache 우선)\n//   let settings = global.get(\"appSettings\");\n//   if (!settings) {\n//     try {\n//       const doc = await db.collection(\"app_config\").doc(\"global\").get();\n//       settings = doc.exists ? (doc.data() || {}) : {};\n//     } catch (e) {\n//       node.status({ fill: \"red\", shape: \"ring\", text: \"Read config failed\" });\n//       node.error(e);\n//       return;\n//     }\n//   }\n\n//   const routines = Array.isArray(settings.routines) ? settings.routines : [];\n//   if (!routines.length) {\n//     node.status({ fill: \"grey\", shape: \"ring\", text: \"No routines\" });\n//     return;\n//   }\n\n//   // 2) KST 시간 계산 (UTC+9)\n//   const nowKST = getKSTDate();\n//   const hhmm = pad2(nowKST.getHours()) + \":\" + pad2(nowKST.getMinutes());\n//   const ymd = String(nowKST.getFullYear()) + pad2(nowKST.getMonth() + 1) + pad2(nowKST.getDate());\n//   const keyMinute = `${ymd}_${hhmm.replace(\":\", \"\")}`; // YYYYMMDD_HHMM\n\n//   let lastFired = context.get(\"lastFired\") || {};\n\n//   // 글로벌 큐 가져오기 (중요!)\n//   let queue = global.get('taskQueue') || [];\n//   let isQueueChanged = false;\n\n//   const outCreate = [];\n//   const outDbg = [];\n\n//   // 통계 데이터 (function2와 동일 로직)\n//   const taskStats = global.get(\"taskStats\") || {};\n\n//   for (let i = 0; i < routines.length; i++) {\n//     const r = routines[i] || {};\n//     const enabled = (r.enabled ?? r.on ?? r.use ?? true) !== false;\n//     if (!enabled) continue;\n\n//     const t = pickTimeStr(r);\n//     if (!t || t !== hhmm) continue;     // 시간 체크 (KST 기준)\n//     if (!matchDow(r, nowKST)) continue; // 요일 체크 (KST 기준)\n\n//     const routineId = sanitizeId(r.id ?? r.routine_id ?? r.name ?? `idx${i}`);\n//     if (!routineId) continue;\n\n//     // 중복 실행 방지\n//     if (lastFired[routineId] === keyMinute) continue;\n//     lastFired[routineId] = keyMinute;\n\n//     // Task 생성\n//     const typeRaw = (r.type ?? r.task_type ?? r.kind ?? \"water\");\n//     const type = String(typeRaw).trim().toLowerCase();\n//     const targetArea = String(r.target_area ?? r.area ?? r.target ?? \"WATER\").trim().toUpperCase();\n//     const priority = Number.isFinite(Number(r.priority)) ? Number(r.priority) : 50;\n\n//     const taskId = `task_rt_${routineId}_${keyMinute}`;\n//     const nowMs = Date.now(); // 생성 시간은 timestamp(UTC) 그대로 써도 됨 (표준)\n\n//     // 예상 시간 계산 (EMA)\n//     const stat = taskStats[type];\n//     const expectedMs = (stat && stat.ema_ms) ? Math.round(stat.ema_ms) : (baseMsMap[type] || 20000);\n\n//     const task = {\n//       task_id: taskId,\n//       type,\n//       user_id: r.user_id ?? \"public\",\n//       status: \"pending\",\n//       created_at: nowMs,\n//       scheduled_at: nowMs,\n//       target_area: targetArea,\n//       priority,\n//       expected_duration_ms: expectedMs,\n//       eta_basis: (stat && stat.ema_ms) ? \"ema\" : \"default\",\n//       source: \"routine\",\n//       routine_id: routineId,\n//       params: r.params ?? {},\n//       interaction_id: null // 루틴은 인터랙션 없음\n//     };\n\n//     // 1. Output용 메시지 준비\n//     outCreate.push({ task: task, payload: task });\n//     outDbg.push({ payload: { ok: true, created: true, hhmm, routineId, taskId } });\n\n//     // 2. Global Queue에 추가 (중요!)\n//     queue.push(task);\n//     isQueueChanged = true;\n//   }\n\n//   // 상태 저장\n//   context.set(\"lastFired\", lastFired);\n//   if (isQueueChanged) {\n//     global.set('taskQueue', queue);\n//     // 필요하다면 여기서 큐 업데이트 이벤트 트리거 가능\n//   }\n\n//   if (!outCreate.length) {\n//     node.status({ fill: \"blue\", shape: \"dot\", text: `tick ${hhmm}` });\n//     return;\n//   }\n\n//   node.status({ fill: \"green\", shape: \"dot\", text: `created ${outCreate.length} @ ${hhmm}` });\n\n//   // 명시적으로 전송\n//   node.send([outCreate, outDbg]);\n\n// })().catch(err => {\n//   node.error(err);\n//   node.status({ fill: \"red\", shape: \"dot\", text: \"Error\" });\n// });\n\n// Routine Scheduler -> create msg.task\n// output1: tasks to create (msg.task 포함)\n// output2: debug\n\nconst db = global.get(\"db\");\nif (!db) {\n  node.warn(\"Firestore not ready in Routine Scheduler\");\n  return [null, [{ payload: { ok: false, error: \"Firestore not ready\" } }]];\n}\n\n// ---- KST 기준 시간(서버 TZ 상관없이) ----\nfunction pad2(n) { return String(n).padStart(2, \"0\"); }\nfunction nowKST() {\n  const k = new Date(Date.now() + 9 * 60 * 60 * 1000);\n  return {\n    y: k.getUTCFullYear(),\n    mo: k.getUTCMonth() + 1,\n    d: k.getUTCDate(),\n    hh: k.getUTCHours(),\n    mm: k.getUTCMinutes(),\n    isoDow: (() => { // 1=Mon ... 7=Sun\n      const js = k.getUTCDay(); // 0=Sun..6=Sat\n      return js === 0 ? 7 : js;\n    })(),\n  };\n}\n\nfunction normTimeHHMM(t) {\n  if (!t) return null;\n  const s = String(t).trim();\n  if (/^\\d{2}:\\d{2}$/.test(s)) return s;\n  if (/^\\d{1}:\\d{2}$/.test(s)) return \"0\" + s;\n  if (/^\\d{4}$/.test(s)) return s.slice(0, 2) + \":\" + s.slice(2);\n  return null;\n}\n\n// UserApp의 days는 \"월=0..일=6\" (mon0) 형태로 들어올 수 있음 :contentReference[oaicite:6]{index=6}\n// → 스케줄러는 ISO(1..7)로 바꿔서 비교\nfunction daysToIso(daysRaw) {\n  if (!Array.isArray(daysRaw) || daysRaw.length === 0) return null;\n\n  const mapStr = { mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6, sun: 7 };\n  const nums = [];\n\n  for (const x of daysRaw) {\n    if (typeof x === \"string\") {\n      const k = x.trim().toLowerCase();\n      if (mapStr[k]) nums.push(mapStr[k]);\n      continue;\n    }\n    if (Number.isFinite(x)) nums.push(Math.trunc(x));\n  }\n\n  if (nums.length === 0) return null;\n\n  // 이미 ISO(1..7)\n  if (nums.every(v => v >= 1 && v <= 7)) return Array.from(new Set(nums));\n\n  // mon0(0..6, Mon=0..Sun=6) → ISO\n  if (nums.every(v => v >= 0 && v <= 6)) {\n    return Array.from(new Set(nums.map(v => (v === 6 ? 7 : v + 1))));\n  }\n\n  return null;\n}\n\nfunction normalizeType(raw) {\n  const s = String(raw || \"\").trim().toLowerCase();\n  if (!s) return \"deliver_water\";\n  const alias = {\n    water: \"deliver_water\",\n    cup: \"collect_cup\",\n    laundry: \"collect_laundry\",\n    charge: \"go_charge\",\n  };\n  return alias[s] || s;\n}\n\nfunction priorityOf(type) {\n  const p = {\n    deliver_water: 1,\n    collect_cup: 2,\n    collect_laundry: 3,\n    go_charge: 10,\n    cancel: 0,\n  };\n  return p[type] ?? 99;\n}\n\nconst k = nowKST();\nconst hhmmNow = `${pad2(k.hh)}:${pad2(k.mm)}`;\nconst keyMinute = `${k.y}${pad2(k.mo)}${pad2(k.d)}_${pad2(k.hh)}${pad2(k.mm)}`;\n\n// lastFired(분 단위 중복 방지)\nlet lastFired = context.get(\"lastFired\") || {};\n// 너무 커지지 않게 정리\nconst keys = Object.keys(lastFired);\nif (keys.length > 5000) lastFired = {};\n\nlet outCreate = [];\nlet outDebug = [];\n\nreturn (async () => {\n  // settings: global cache 우선, 없으면 Firestore\n  let settings = global.get(\"appSettings\");\n  if (!settings || typeof settings !== \"object\") {\n    const snap = await db.collection(\"app_config\").doc(\"global\").get();\n    settings = snap.exists ? (snap.data() || {}) : {};\n    global.set(\"appSettings\", settings);\n  }\n\n  const routines = Array.isArray(settings.routines) ? settings.routines : [];\n  if (routines.length === 0) return [null, null];\n\n  for (const r of routines) {\n    if (!r || r.enabled === false) continue;\n\n    const runAt = normTimeHHMM(r.time);\n    if (!runAt) continue;\n    if (runAt !== hhmmNow) continue;\n\n    // repeat/day 체크\n    const repeat = (r.repeat === \"weekly\") ? \"weekly\" : \"daily\";\n    if (repeat === \"weekly\") {\n      const isoDays = daysToIso(r.days);\n      if (isoDays && !isoDays.includes(k.isoDow)) continue;\n    }\n\n    const routineId = String(r.id || \"noid\");\n    const firedKey = `${routineId}:${keyMinute}`;\n    if (lastFired[firedKey]) continue;\n    lastFired[firedKey] = Date.now();\n\n    // ✅ action_type 우선 사용 (UserApp이 이 필드로 저장함) :contentReference[oaicite:7]{index=7}\n    const type = normalizeType(r.action_type ?? r.type ?? r.task_type ?? r.kind ?? \"deliver_water\");\n\n    const targetArea =\n      String(\n        r.target_area ||\n        r.area ||\n        (r.target_mode === \"my\" ? settings.user_place : \"\") ||\n        settings.user_place ||\n        \"USER1\"\n      ).trim();\n\n    const task = {\n      task_id: `task_rt_${routineId}_${keyMinute}`,\n      source: \"routine\",\n      routine_id: routineId,\n      type,\n      target_area: targetArea,\n      priority: priorityOf(type),\n      status: \"pending\",\n      scheduled_at: Date.now(),\n      created_at: Date.now(),\n      meta: {\n        repeat,\n        time: runAt,\n        days: Array.isArray(r.days) ? r.days : [],\n      },\n    };\n\n    outCreate.push({ task, payload: task });\n    outDebug.push({ payload: { ok: true, fired: firedKey, task_id: task.task_id, type, target_area: targetArea } });\n  }\n\n  context.set(\"lastFired\", lastFired);\n\n  return [\n    outCreate.length ? outCreate : null,\n    outDebug.length ? outDebug : null,\n  ];\n})().catch((err) => {\n  node.error(err);\n  return [null, [{ payload: { ok: false, error: String(err?.message || err) } }]];\n});\n",
+        "outputs": 2,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 870,
+        "y": 2560,
+        "wires": [
+            [
+                "2ccacb1608c5ba74"
+            ],
+            [
+                "1082c3d0195e3e5c"
+            ]
+        ]
+    },
+    {
+        "id": "1082c3d0195e3e5c",
+        "type": "debug",
+        "z": "49f8711fc297a8c1",
+        "name": "debug 10",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1200,
+        "y": 2560,
+        "wires": []
+    },
+    {
+        "id": "d10c4415b361b866",
+        "type": "telegram bot",
+        "botname": "yujinnnojin",
+        "usernames": "",
+        "chatids": "",
+        "baseapiurl": "",
+        "testenvironment": false,
+        "updatemode": "polling",
+        "pollinterval": 300,
+        "usesocks": false,
+        "sockshost": "",
+        "socksprotocol": "socks5",
+        "socksport": 6667,
+        "socksusername": "anonymous",
+        "sockspassword": "",
+        "bothost": "",
+        "botpath": "",
+        "localbothost": "0.0.0.0",
+        "localbotport": 8443,
+        "publicbotport": 8443,
+        "privatekey": "",
+        "certificate": "",
+        "useselfsignedcertificate": false,
+        "sslterminated": false,
+        "verboselogging": false
+    },
+    {
+        "id": "3c16a07776b27396",
+        "type": "mqtt-broker",
+        "name": "Server",
+        "broker": "localhost",
+        "port": 1883,
+        "clientid": "",
+        "autoConnect": true,
+        "usetls": false,
+        "protocolVersion": 4,
+        "keepalive": 60,
+        "cleansession": true,
+        "autoUnsubscribe": true,
+        "birthTopic": "",
+        "birthQos": "0",
+        "birthRetain": "false",
+        "birthPayload": "",
+        "birthMsg": {},
+        "closeTopic": "",
+        "closeQos": "0",
+        "closeRetain": "false",
+        "closePayload": "",
+        "closeMsg": {},
+        "willTopic": "",
+        "willQos": "0",
+        "willRetain": "false",
+        "willPayload": "",
+        "willMsg": {},
+        "userProps": "",
+        "sessionExpiry": ""
+    },
+    {
+        "id": "e6e1b7942a2b8330",
+        "type": "ui_group",
+        "name": "Robots",
+        "tab": "8949e4e33e605647",
+        "order": 2,
+        "disp": true,
+        "width": 6,
+        "collapse": false,
+        "className": ""
+    },
+    {
+        "id": "7e8e44e7110066b9",
+        "type": "ui_group",
+        "name": "Summary",
+        "tab": "8949e4e33e605647",
+        "order": 1,
+        "disp": true,
+        "width": 6,
+        "collapse": false,
+        "className": ""
+    },
+    {
+        "id": "920df32220cd089d",
+        "type": "ui_group",
+        "name": "Tasks",
+        "tab": "8949e4e33e605647",
+        "order": 3,
+        "disp": true,
+        "width": 6,
+        "collapse": false,
+        "className": ""
+    },
+    {
+        "id": "ab2f507577ca5dbe",
+        "type": "ui_group",
+        "name": "Events",
+        "tab": "8949e4e33e605647",
+        "order": 4,
+        "disp": true,
+        "width": 6,
+        "collapse": false,
+        "className": ""
+    },
+    {
+        "id": "8949e4e33e605647",
+        "type": "ui_tab",
+        "name": "AGV Control Center",
+        "icon": "dashboard",
+        "order": 1,
+        "disabled": false,
+        "hidden": false
+    },
+    {
+        "id": "337f092a465fc819",
+        "type": "global-config",
+        "env": [],
+        "modules": {
+            "node-red-contrib-telegrambot": "17.0.3",
+            "node-red-dashboard": "3.6.6"
+        }
+    }
+]

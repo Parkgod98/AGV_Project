@@ -1,0 +1,149 @@
+/* =========================
+   Base (Bright Pink)
+========================= */
+QMainWindow {
+  background: #f6eef3;     /* 연한 핑크-오프화이트 */
+}
+
+QLabel {
+  color: #3a2a35;          /* 다크 퍼플 텍스트 */
+  font-size: 13px;
+}
+
+
+/* =========================
+   Navigation Frame
+========================= */
+QFrame#frame_nav {
+  background: #ffffff;
+  border: 1px solid #f1c6dd;
+  border-radius: 14px;
+}
+
+
+/* =========================
+   Buttons
+========================= */
+QPushButton {
+  background: #ffffff;
+  border: 1px solid #e7b3cf;
+  border-radius: 14px;
+  color: #3a2a35;
+  padding: 8px 14px;
+  font-size: 13px;
+}
+
+QPushButton:hover {
+  background: #ffe6f1;
+  border: 1px solid #ff5aa5;
+}
+
+QPushButton:checked {
+  background: #ffd1e6;
+  border: 1px solid #ff5aa5;
+  color: #2b1622;
+}
+
+
+/* =========================
+   GroupBox
+========================= */
+QGroupBox {
+  color: #3a2a35;
+  background: #ffffff;
+  border: 1px solid #f1c6dd;
+  border-radius: 18px;
+  margin-top: 14px;
+}
+
+QGroupBox::title {
+  subcontrol-origin: margin;
+  left: 14px;
+  padding: 0 6px;
+  color: #b33c7a;          /* 로즈 핑크 타이틀 */
+}
+
+
+/* =========================
+   Cards (Overview)
+========================= */
+QFrame#card,
+QFrame#card_batt,
+QFrame#card_co2_max,
+QFrame#card_co2_cur,
+QFrame#card_temp {
+  background: #ffffff;
+  border: 1px solid #f1c6dd;
+  border-radius: 22px;
+  padding: 10px;
+}
+
+/* 카드 내부 텍스트 */
+QFrame#card QLabel,
+QFrame#card_batt QLabel,
+QFrame#card_co2_max QLabel,
+QFrame#card_co2_cur QLabel,
+QFrame#card_temp QLabel {
+  color: #2b1622;
+}
+
+
+/* =========================
+   Card Typography
+========================= */
+QLabel#cardTitle {
+  color: #b33c7a;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+QLabel#lbl_batt_value,
+QLabel#lbl_task_value,
+QLabel#lbl_time_value,
+QLabel#lbl_temp_value {
+  color: #1f0f18;
+  font-size: 30px;
+  font-weight: 700;
+}
+
+QLabel#cardUnit {
+  color: #8a5a72;
+  font-size: 12px;
+}
+
+
+/* =========================
+   Text / Tables
+========================= */
+QTextEdit {
+  background: #ffffff;
+  border: 1px solid #f1c6dd;
+  border-radius: 16px;
+  color: #2b1622;
+}
+
+QTableWidget {
+  background: #ffffff;
+  border: 1px solid #f1c6dd;
+  border-radius: 16px;
+  color: #2b1622;
+  gridline-color: #f1c6dd;
+}
+
+QHeaderView::section {
+  background: #ffe6f1;
+  color: #2b1622;
+  border: 1px solid #f1c6dd;
+}
+
+
+/* =========================
+   MAP THEME TOKENS (Bright Pink)
+========================= */
+QGraphicsView#mapView {
+  background: #ffffff;
+  border: 1px solid #f1c6dd;
+  border-radius: 18px;
+
+  /* QSS Theme Tokens */
+}

@@ -1,0 +1,36 @@
+# =========================
+# Python virtual environments
+# =========================
+.venv/
+venv/
+env/
+*venv*/
+
+# QtCreator가 프로젝트 내부에 만든 venv (너 경고 경로 케이스)
+PJT_Qt/.qtcreator/Python_3_10_11venv/
+
+# (선택) site-packages가 프로젝트 안에 들어오는 경우도 방지
+**/Lib/site-packages/
+**/lib/python*/site-packages/
+
+# =========================
+# Python cache
+# =========================
+__pycache__/
+*.py[cod]
+
+# =========================
+# Qt Creator generated files
+# =========================
+*.user
+*.user.*
+*.autosave
+.qtc_clangd/
+
+# =========================
+# Secrets / Keys
+# =========================
+assets/secrets/
+# 또는 특정 파일만:
+# assets/secrets/ssafy_embedded_qt-gui-controller.json
+

@@ -1,1 +1,0 @@
-compile_ui.py : 직접 .ui -> .py로 변환하는 코드

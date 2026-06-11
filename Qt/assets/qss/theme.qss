@@ -1,0 +1,364 @@
+/* =========================
+   Base
+========================= */
+QMainWindow {
+  background: #0f1115;
+}
+
+QLabel {
+  color: #d7dbe0;
+  font-size: 13px;
+}
+
+
+/* =========================
+   Navigation Frame
+========================= */
+QFrame#frame_nav {
+  background: #141821;
+  border: 1px solid #222a38;
+  border-radius: 10px;
+}
+
+
+/* =========================
+   Buttons
+========================= */
+QPushButton {
+  background: #1b2130;
+  border: 1px solid #2b3650;
+  border-radius: 10px;
+  color: #e7eaf0;
+  padding: 8px 14px;
+  font-size: 13px;
+}
+QPushButton:hover {
+  background: #222b3f;
+}
+
+
+/* =========================
+   GroupBox
+========================= */
+QGroupBox {
+  color: #d7dbe0;
+  border: 1px solid #222a38;
+  border-radius: 12px;
+  margin-top: 10px;
+}
+QGroupBox::title {
+  subcontrol-origin: margin;
+  left: 10px;
+  padding: 0 6px;
+}
+
+
+/* =========================
+   Cards (Overview 포함 핵심 수정)
+========================= */
+
+/* 상단 로봇 정보 바 스타일 */
+QFrame#frame_status_bar {
+    background-color: #141821;
+    border: 1px solid #222a38;
+    border-radius: 10px;
+}
+
+QLabel#lbl_robot_id {
+    color: #3b82f6; /* 파란색 포인트 */
+    font-size: 14px;
+    font-weight: bold;
+}
+
+QLabel#lbl_conn {
+    color: #a8b0bd;
+    font-size: 12px;
+}
+
+/* 기존 card */
+QFrame#card,
+
+/* Overview 카드들 */
+QFrame#card_batt,
+QFrame#card_task_amt,
+QFrame#card_take_time,
+QFrame#card_temp {
+  background: #141821;
+  border: 1px solid #222a38;
+  border-radius: 16px;
+  padding: 6px;
+}
+
+/* 카드 안 모든 텍스트 기본 색 */
+QFrame#card QLabel,
+QFrame#card_batt QLabel,
+QFrame#card_task_amt QLabel,
+QFrame#card_take_time QLabel,
+QFrame#card_temp QLabel {
+  color: #e7eaf0;
+}
+
+
+/* =========================
+   Card Typography (네가 원하던 핵심)
+========================= */
+
+
+/* Title (상단 소제목) */
+QLabel#lbl_batt_title,
+QLabel#lbl_temp_title,
+QLabel#lbl_task_title,
+QLabel#lbl_time_title {
+  color: #a8b0bd;
+  font-size: 12px;
+}
+
+
+/* Value (중앙의 큰 숫자) */
+QLabel#lbl_batt_value,
+QLabel#lbl_temp_value,
+QLabel#lbl_task_value,  /* 추가: 이제 코드가 이 ID를 찾아서 적용합니다 */
+QLabel#lbl_time_value { /* 추가 */
+  color: #ffffff;
+  font-size: 30px;
+  font-weight: 700;
+}
+
+/* Unit */
+QLabel#cardUnit {
+  color: #a8b0bd;
+  font-size: 12px;
+}
+QLabel#lbl_time_unit {
+    color: #a8b0bd;
+    font-size: 11px; /* 단위를 명확히 하기 위해 살짝 작게 */
+    font-weight: 500;
+}
+
+
+/* =========================
+   Text / Tables
+========================= */
+QTextEdit {
+  background: #0b0e14;
+  border: 1px solid #222a38;
+  border-radius: 12px;
+  color: #d7dbe0;
+}
+
+QTableWidget {
+  background: #0b0e14;
+  border: 1px solid #222a38;
+  border-radius: 12px;
+  color: #d7dbe0;
+  gridline-color: #222a38;
+}
+
+QHeaderView::section {
+  background: #141821;
+  color: #d7dbe0;
+  border: 1px solid #222a38;
+}
+
+/* =========================
+   MAP THEME TOKENS
+========================= */
+QGraphicsView#mapView {
+  background: #0b0e14;
+  border: 1px solid #222a38;
+  border-radius: 12px;
+
+  /* 가상의 토큰 */
+}
+
+/* =========================
+   PLOT THEME TOKENS (PyQtGraph)
+========================= */
+QWidget#plotRoute,
+QWidget#plotTimeSeries {
+}
+
+/* =========================
+   ProgressBar (Grab)
+========================= */
+QProgressBar {
+    min-height: 18px;              /* 두께(높이) */
+    max-height: 18px;
+    border: 1px solid #263041;
+    border-radius: 9px;            /* height의 절반 정도가 예쁨 */
+    background: #121826;
+    color: #cfd8e3;                /* % 텍스트 */
+    text-align: right;
+    padding-right: 6px;
+}
+
+QProgressBar::chunk {
+    border-radius: 9px;
+    background: qlineargradient(
+        x1:0, y1:0, x2:1, y2:0,
+        stop:0 #2dd4bf,           /* mint */
+        stop:1 #3b82f6            /* blue */
+    );
+}
+
+/* =========================
+   Slider (Speed)
+========================= */
+QSlider::groove:horizontal {
+    height: 10px;                  /* 트랙 두께 */
+    border-radius: 5px;
+    background: #1a2333;
+    border: 1px solid #263041;
+}
+
+QSlider::sub-page:horizontal {
+    border-radius: 5px;
+    background: qlineargradient(
+        x1:0, y1:0, x2:1, y2:0,
+        stop:0 #60a5fa,
+        stop:1 #22c55e
+    );
+}
+
+QSlider::add-page:horizontal {
+    border-radius: 5px;
+    background: #101726;
+}
+
+QSlider::handle:horizontal {
+    width: 18px;
+    margin: -6px 0;                /* handle이 groove보다 커질 때 가운데 정렬용 */
+    border-radius: 9px;
+    background: #e5e7eb;
+    border: 2px solid #60a5fa;
+}
+
+QSlider::handle:horizontal:hover {
+    border: 2px solid #22c55e;
+}
+
+/* =========================
+   Dial (Grab)
+========================= */
+QDial {
+    background: #0f141f;
+}
+
+QDial::handle { /* 플랫폼 따라 적용 안 될 수도 */
+    background: #e5e7eb;
+}
+
+
+/* =========================
+   Analytics Plot Theme (PyQtGraph)
+========================= */
+ThemedPlotWidget {
+    /* 배경 및 그리드 */
+    qproperty-plotBg: "#141821";      /* 네이비 배경 */
+    qproperty-gridColor: "#222a38";   /* 그리드 선 색상 */
+    qproperty-gridAlpha: 0.1;         /* 그리드 투명도 (아주 은은하게) */
+
+    /* 축 및 라벨 */
+    qproperty-axisColor: "#2d3548";   /* 축 선 색상 */
+    qproperty-labelColor: "#94a3b8";  /* 축 글자 색상 (그레이 블루) */
+    qproperty-axisWidth: 1;
+
+    /* 데이터 선 및 막대 기본 컬러 */
+    qproperty-lineColor: "#3b82f6";      /* 메인 블루 */
+    qproperty-markerColor: "#2dd4bf";    /* 포인트 민트 */
+    qproperty-lineWidth: 2;
+}
+
+/* map.ui에 정의된 mapView (QGraphicsView) 스타일 */
+MapView#mapView {
+    qproperty-sceneBg: "#0b0e14";    /* 맵 배경색 (매우 어두운 네이비) */
+    qproperty-gridColor: "#1f2937";  /* 그리드 선 색상 */
+    qproperty-borderColor: "#334155";/* 맵 외곽선 */
+    qproperty-pathColor: "#3b82f6";  /* 궤적(Trace) 색상 - 포인트 블루 */
+    qproperty-robotColor: "#ffffff"; /* 로봇 마커 색상 */
+}
+
+/* =========================
+   TabWidget (Logs & Tasks Tabs)
+========================= */
+QTabWidget::pane {
+    border: 1px solid #222a38;
+    background: #141821;
+    border-radius: 8px;
+    top: -1px;
+}
+
+QTabBar::tab {
+    background: #0f1115;
+    color: #a8b0bd;
+    padding: 10px 20px;
+    border: 1px solid #222a38;
+    border-bottom: none;
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+    margin-right: 4px;
+}
+
+QTabBar::tab:selected {
+    background: #141821;
+    color: #3b82f6; /* 포인트 블루 */
+    font-weight: bold;
+}
+
+QTabBar::tab:hover:!selected {
+    background: #1b2130;
+    color: #e7eaf0;
+}
+
+/* =========================
+   Tables & Lists (Logs & Tasks)
+========================= */
+QTableView, QListWidget {
+    background-color: #0b0e14;
+    border: 1px solid #222a38;
+    border-radius: 8px;
+    color: #d7dbe0;
+    gridline-color: #1a1f2b;
+    selection-background-color: #1e293b;
+    selection-color: #3b82f6;
+    outline: none;
+}
+
+QHeaderView::section {
+    background-color: #141821;
+    color: #a8b0bd;
+    padding: 6px;
+    border: 1px solid #222a38;
+    font-weight: bold;
+    text-transform: uppercase;
+    font-size: 11px;
+}
+
+QTableView::item:selected, QListWidget::item:selected {
+    background-color: #1e293b;
+    border-left: 3px solid #3b82f6; /* 선택 시 왼쪽 포인트 선 */
+}
+
+/* =========================
+   Inputs (Search, Combo, Date)
+========================= */
+QLineEdit, QComboBox, QDateEdit {
+    background: #1b2130;
+    border: 1px solid #2d3650;
+    border-radius: 6px;
+    color: #e7eaf0;
+    padding: 5px 10px;
+}
+
+QComboBox::drop-down {
+    border: none;
+    width: 20px;
+}
+
+QComboBox::down-arrow {
+    image: none; /* 필요시 화살표 아이콘 경로 추가 */
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 5px solid #a8b0bd;
+    margin-right: 10px;
+}

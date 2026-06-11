@@ -1,0 +1,1260 @@
+[
+    {
+        "id": "49f8711fc297a8c1",
+        "type": "tab",
+        "label": "플로우 1",
+        "disabled": false,
+        "info": "",
+        "env": []
+    },
+    {
+        "id": "048a808c4f50c1eb",
+        "type": "telegram receiver",
+        "z": "49f8711fc297a8c1",
+        "name": "",
+        "bot": "d10c4415b361b866",
+        "saveDataDir": "",
+        "filterCommands": false,
+        "hasinput": false,
+        "inputs": 0,
+        "handleallupdates": false,
+        "x": 410,
+        "y": 480,
+        "wires": [
+            [
+                "7476d3bed8965c26"
+            ],
+            []
+        ]
+    },
+    {
+        "id": "d1e13ead5e796c2d",
+        "type": "telegram sender",
+        "z": "49f8711fc297a8c1",
+        "name": "",
+        "bot": "d10c4415b361b866",
+        "haserroroutput": false,
+        "outputs": 1,
+        "x": 1030,
+        "y": 340,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "7476d3bed8965c26",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "function 1",
+        "func": "node.warn(\"GMS_KEY = \" + global.get(\"GMS_KEY\"));\n\nconst chatId = msg.payload.chatId;\nconst text = (msg.payload.content || \"\").trim();\n\n// ✅ 1) content가 file_id처럼 보이면 음성/파일로 간주하고 막기\nconst looksLikeFileId = typeof text === \"string\" && /^Aw[A-Za-z0-9_-]{10,}$/.test(text);\n\nif (looksLikeFileId) {\n  msg.payload = {\n    chatId,\n    type: \"message\",\n    content: \"🎙️ 음성 명령(STT)은 아직 연결 전이에요.\\n지금은 버튼 또는 텍스트로 입력해 주세요.\",\n    options: {}\n  };\n  return [msg, null, null]; // 텔레그램만 응답, MQTT/LLM 안 탐\n}\n\nlet reply = {\n  chatId,\n  type: \"message\",\n  content: \"\",\n  options: {}\n};\n\nlet mqttMsg = null;   // output2\nlet llmReq = null;    // output3\n\nfunction makeMqtt(topic, type, target_area, inputKind) {\n  return {\n    topic,\n    payload: JSON.stringify({\n      type,\n      target_area,\n      user_id: `tg_${chatId}`,\n      meta: { source: \"telegram\", input: inputKind, raw: text }\n    })\n  };\n}\n\n// /start\nif (text === \"/start\") {\n  if (!flow.get(\"default_area_\" + chatId)) flow.set(\"default_area_\" + chatId, \"USER1\");\n  reply.content = \"안녕하세요! AGV 서비스 봇입니다.\\n무엇을 도와드릴까요?\";\n  reply.options = {\n    reply_markup: {\n      keyboard: [\n        [\"☕ 물 가져와줘\", \"🥤 컵 가져가줘\"],\n        [\"🧺 세탁물 수거해줘\"],\n        [\"📍 지금 상태 보여줘\", \"📊 오늘 요약 보여줘\"]\n      ],\n      resize_keyboard: true,\n      one_time_keyboard: false\n    }\n  };\n  msg.payload = reply;\n  return [msg, null, null];\n}\n\n// 버튼 명령(룰 기반 즉시 publish)\nif (text === \"☕ 물 가져와줘\") {\n  mqttMsg = makeMqtt(\"cmd/water/request\", \"deliver_water\", \"USER1\", \"button\");\n  reply.content = \"물 배달 요청을 접수했어요 💧\";\n  msg.payload = reply;\n  return [msg, mqttMsg, null];\n}\nif (text === \"🥤 컵 가져가줘\") {\n  mqttMsg = makeMqtt(\"cmd/cup/request\", \"collect_cup\", \"USER1\", \"button\");\n  reply.content = \"컵 회수 요청을 접수했어요 🥤\";\n  msg.payload = reply;\n  return [msg, mqttMsg, null];\n}\nif (text === \"🧺 세탁물 수거해줘\") {\n  mqttMsg = makeMqtt(\"cmd/laundry/request\", \"collect_laundry\", \"USER1\", \"button\");\n  reply.content = \"세탁물 수거 요청을 접수했어요 🧺\";\n  msg.payload = reply;\n  return [msg, mqttMsg, null];\n}\n\n// 그 외 텍스트 = 자연어/음성(STT 결과) → LLM\nreply.content = `요청을 해석 중이에요… 🤖\\n입력: ${text}`;\nmsg.payload = reply;\n\n// LLM API 호출용 msg 구성 (http request로 보낼 body + headers)\nllmReq = {\n  headers: {\n    \"Content-Type\": \"application/json\",\n    // 환경변수 사용 (필수)\n    \"Authorization\": `Bearer ${global.get(\"GMS_KEY\")}`\n  },\n  payload: {\n    model: \"gpt-4.1-nano\",\n    temperature: 0.2,\n    max_tokens: 200,\n    messages: [\n      {\n        role: \"system\",\n        content:\n          \"너는 AGV 사용자 앱의 명령 파서다. 반드시 JSON만 출력해.\\n\" +\n          \"허용 type: deliver_water, collect_cup, collect_laundry\\n\" +\n          \"허용 target_area: USER1, USER2, DOCK, BASE\\n\" +\n          '형식: {\"type\":\"...\",\"target_area\":\"...\",\"confidence\":0.0}\\n' +\n          \"추론 설명 금지. JSON 외 텍스트 금지.\"\n      },\n      {\n        role: \"user\",\n        content: text\n      }\n    ]\n  },\n  _tg: { chatId, raw: text } // 후단에서 텔레그램 응답 만들 때 쓰려고 보관\n};\n\nreturn [msg, null, llmReq];\n",
+        "outputs": 3,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 680,
+        "y": 480,
+        "wires": [
+            [
+                "d1e13ead5e796c2d"
+            ],
+            [
+                "6b5f1a99de2569f0"
+            ],
+            [
+                "54431a46252d1602"
+            ]
+        ]
+    },
+    {
+        "id": "6b5f1a99de2569f0",
+        "type": "mqtt out",
+        "z": "49f8711fc297a8c1",
+        "name": "",
+        "topic": "",
+        "qos": "",
+        "retain": "",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "3c16a07776b27396",
+        "x": 990,
+        "y": 400,
+        "wires": []
+    },
+    {
+        "id": "bea82cdd7f9e1fa3",
+        "type": "mqtt in",
+        "z": "49f8711fc297a8c1",
+        "name": "",
+        "topic": "cmd/+/request",
+        "qos": "2",
+        "datatype": "utf8",
+        "broker": "3c16a07776b27396",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 390,
+        "y": 640,
+        "wires": [
+            [
+                "e0253ffdf7c81394",
+                "084632d493b02014"
+            ]
+        ]
+    },
+    {
+        "id": "e0253ffdf7c81394",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "function 2",
+        "func": "// cmd/*/request 에서 넘어온 msg\n// msg.topic 예: \"cmd/water/request\"\n// msg.payload 예: JSON 문자열: {\"type\":\"deliver_water\",\"target_area\":\"USER1\",\"user_id\":\"tg_1234\"}\n\nlet data = {};\ntry {\n    data = JSON.parse(msg.payload || '{}');\n} catch (e) {\n    node.error('Invalid JSON payload in cmd request', msg);\n    return null;\n}\n\n// 글로벌 taskQueue 가져오기 (없으면 빈 배열)\nlet queue = global.get('taskQueue') || [];\n\n// task_id 생성 (간단 버전)\nconst taskId = 'task_' + Date.now();\n\n// type은 payload에 없으면 topic에서 유추해도 됨 (지금은 payload 기준으로)\nconst taskType = data.type || (() => {\n    if (msg.topic.startsWith('cmd/water/')) \n        return 'deliver_water';\n    if (msg.topic.startsWith('cmd/cup/')) \n        return 'collect_cup';\n    if (msg.topic.startsWith('cmd/laundry/')) \n        return 'collect_laundry';\n    return 'unknown';\n})();\n\n// Task 객체 정의 (v0.1)\nconst task = {\n    task_id: taskId,\n    type: taskType,                          // deliver_water / collect_cup / collect_laundry ...\n    target_area: data.target_area || 'USER1',\n    user_id: data.user_id || null,\n    status: 'pending',                       // pending / running / done / failed\n    created_at: Date.now(),\n    // 나중에 assigned_robot / started_at / finished_at 추가 예정\n};\n\n// 큐에 push\nqueue.push(task);\nglobal.set('taskQueue', queue);\n\n// 디버그용 로그\nnode.warn({ action: 'TASK_CREATED', task: task });\n\n// 아래로 넘겨줄 메시지 세팅\nmsg.task = task;           // 다음 노드에서 사용\nmsg.payload = JSON.stringify(task);      // 디버그 하기 좋게 payload에도 넣어둠\n\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 620,
+        "y": 640,
+        "wires": [
+            [
+                "2ccacb1608c5ba74"
+            ]
+        ]
+    },
+    {
+        "id": "8fa070ba704430fc",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "function 3",
+        "func": "// v0.1: 들어온 task를 무조건 agv1에 바로 할당해서 보냄\n\nlet task = msg.task;\nif (!task) {\n    node.warn('No task found in msg');\n    return null;\n}\n\n// 상태 변경\ntask.status = 'running';\ntask.assigned_robot = 'agv1';\ntask.started_at = Date.now();\n\n// 글로벌 큐에도 반영\nlet queue = global.get('taskQueue') || [];\nfor (let i = 0; i < queue.length; i++) {\n    if (queue[i].task_id === task.task_id) {\n        queue[i] = task;\n        break;\n    }\n}\nglobal.set('taskQueue', queue);\n\n// 디버그용\nnode.warn({ action: 'TASK_ASSIGNED', task: task });\n\n// 이 msg를 mqtt out으로 보낼 준비\nmsg.topic = 'robot/agv1/task';\nmsg.payload = JSON.stringify(task);\n\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 860,
+        "y": 640,
+        "wires": [
+            [
+                "58d8d616da6872e1"
+            ]
+        ]
+    },
+    {
+        "id": "c02ac5399c925f84",
+        "type": "mqtt out",
+        "z": "49f8711fc297a8c1",
+        "name": "",
+        "topic": "",
+        "qos": "",
+        "retain": "",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "3c16a07776b27396",
+        "x": 1270,
+        "y": 640,
+        "wires": []
+    },
+    {
+        "id": "084632d493b02014",
+        "type": "debug",
+        "z": "49f8711fc297a8c1",
+        "name": "debug 1",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 520,
+        "y": 720,
+        "wires": []
+    },
+    {
+        "id": "a8cdfef7f11748d6",
+        "type": "mqtt in",
+        "z": "49f8711fc297a8c1",
+        "name": "robot status",
+        "topic": "robot/+/status",
+        "qos": "2",
+        "datatype": "utf8",
+        "broker": "3c16a07776b27396",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 390,
+        "y": 840,
+        "wires": [
+            [
+                "95ebc22a961575da"
+            ]
+        ]
+    },
+    {
+        "id": "95ebc22a961575da",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "function(updateStatus)",
+        "func": "// robot/+/status 로부터 들어오는 msg를 처리하는 함수\n\n// 1) payload JSON 파싱\nlet status;\ntry {\n    status = JSON.parse(msg.payload || '{}');\n} catch (e) {\n    node.error('Invalid JSON in robot status', msg);\n    return null;\n}\n\n// 2) 토픽에서 robot_id 추출: robot/agv1/status\nconst parts = msg.topic.split('/');\nconst robotIdFromTopic = parts[1] || null;\nconst robotId = status.robot_id || robotIdFromTopic || 'unknown';\n\n// 3) robots 상태 갱신 (global.robots)\nlet robots = global.get('robots') || {};\nconst now = Date.now();\nrobots[robotId] = {\n    // 기존 값 유지(추가 필드 안 날리기)\n    ...(robots[robotId] || {}),\n\n    // 표준 필드\n    robot_id: robotId,\n    state: status.state || 'unknown',\n    task_id: status.task_id || null,\n    battery: status.battery ?? null,\n    area: status.area || null,\n    error_code: status.error_code || null,\n\n    // 디지털 트윈 핵심 필드 (추가)\n    pose: status.pose || (robots[robotId]?.pose ?? null),\n    target_area: status.target_area || (robots[robotId]?.target_area ?? null),\n\n    updated_at: status.updated_at || now\n};\nglobal.set('robots', robots);\n\n// 4) taskQueue/events 반영 (task_id 있을 때만)\nlet taskQueue = global.get('taskQueue') || [];\nlet events = global.get('events') || [];\n\nif (status.task_id) {\n    const taskId = status.task_id;\n\n    for (let i = 0; i < taskQueue.length; i++) {\n        if (taskQueue[i].task_id === taskId) {\n\n            if (status.state === 'done' || status.state === 'idle') {\n                taskQueue[i].status = 'done';\n                taskQueue[i].finished_at = Date.now();\n            } else if (status.state === 'running') {\n                taskQueue[i].status = 'running';\n                if (!taskQueue[i].started_at) taskQueue[i].started_at = Date.now();\n            } else if (status.state === 'error') {\n                taskQueue[i].status = 'failed';\n                taskQueue[i].finished_at = Date.now();\n                taskQueue[i].error_code = status.error_code || null;\n            }\n\n            taskQueue[i].assigned_robot = robotId;\n            break;\n        }\n    }\n    global.set('taskQueue', taskQueue);\n\n    events.push({\n        ts: Date.now(),\n        type: 'task_status_update',\n        robot_id: robotId,\n        task_id: taskId,\n        state: status.state,\n        area: status.area || null,\n        target_area: status.target_area || null,\n        pose: status.pose || null,\n        error_code: status.error_code || null\n    });\n\n    if (events.length > 200) events = events.slice(events.length - 200);\n    global.set('events', events);\n}\n\n// 5) 디버그 payload 세팅\nmsg.payload = {\n    last_status: status,\n    robots: robots\n};\n\n// ----------------------\n// Firestore write (추가)\n// ----------------------\nconst db = global.get(\"db\");\nif (db) {\n    // robots/{robotId}\n    db.collection(\"robots\").doc(robotId).set(robots[robotId], { merge: true })\n        .catch(err => node.error(\"[robots write] \" + err));\n\n    // tasks/{task_id} (있을 때만)\n    if (status.task_id) {\n        const mappedStatus =\n            (status.state === \"error\") ? \"failed\" :\n            (status.state === \"done\" || status.state === \"idle\") ? \"done\" :\n            (status.state === \"running\") ? \"running\" : \"unknown\";\n\n        const taskPatch = {\n            status: mappedStatus,\n            assigned_robot: robotId,\n            error_code: status.error_code || null,\n        };\n\n        if (status.state === \"done\" || status.state === \"idle\" || status.state === \"error\") {\n            taskPatch.finished_at = Date.now();\n        }\n\n        db.collection(\"tasks\").doc(status.task_id).set(taskPatch, { merge: true })\n            .catch(err => node.error(\"[tasks write] \" + err));\n    }\n\n    // events add\n    db.collection(\"events\").add({\n        ts: Date.now(),\n        type: \"task_status_update\",\n        robot_id: robotId,\n        task_id: status.task_id || null,\n        state: status.state || null,\n        area: status.area || null,\n        target_area: status.target_area || null,\n        pose: status.pose || null,\n        error_code: status.error_code || null\n    }).catch(err => node.error(\"[events add] \" + err));\n}\n\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 700,
+        "y": 840,
+        "wires": [
+            [
+                "0ea75d0a1dd47579"
+            ]
+        ]
+    },
+    {
+        "id": "0ea75d0a1dd47579",
+        "type": "debug",
+        "z": "49f8711fc297a8c1",
+        "name": "debug 2",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 960,
+        "y": 840,
+        "wires": []
+    },
+    {
+        "id": "b9b40ef75eda6086",
+        "type": "inject",
+        "z": "49f8711fc297a8c1",
+        "name": "refresh robots",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "1",
+        "crontab": "",
+        "once": true,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 240,
+        "y": 2960,
+        "wires": [
+            [
+                "62da11a590d356e1"
+            ]
+        ]
+    },
+    {
+        "id": "62da11a590d356e1",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "getRobots",
+        "func": "const robots = global.get('robots') || {};\nconst arr = [];\n\nfor (const id in robots) {\n    const r = robots[id];\n    // updated_at 누락 방어\n    if (!r.updated_at) r.updated_at = Date.now();\n    arr.push(r);\n}\n\nmsg.robots = arr;\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 550,
+        "y": 2960,
+        "wires": [
+            [
+                "b1495853d26db37c"
+            ]
+        ]
+    },
+    {
+        "id": "c8bbc855845ed80c",
+        "type": "inject",
+        "z": "49f8711fc297a8c1",
+        "name": "refresh tasks",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "1",
+        "crontab": "",
+        "once": true,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 260,
+        "y": 3080,
+        "wires": [
+            [
+                "49c2e81ae9744bc4"
+            ]
+        ]
+    },
+    {
+        "id": "49c2e81ae9744bc4",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "getTasks",
+        "func": "let tasks = global.get('taskQueue') || [];\n\n// 최근 생성된 순서대로 보고 싶으면 정렬\ntasks = tasks.slice().sort((a, b) => (b.created_at || 0) - (a.created_at || 0));\n\nmsg.tasks = tasks;\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 560,
+        "y": 3080,
+        "wires": [
+            [
+                "c915a198b0c6cae3"
+            ]
+        ]
+    },
+    {
+        "id": "6867664da4b8f9fd",
+        "type": "inject",
+        "z": "49f8711fc297a8c1",
+        "name": "refresh events",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "1",
+        "crontab": "",
+        "once": true,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 260,
+        "y": 3200,
+        "wires": [
+            [
+                "b6c7d07a0458179a"
+            ]
+        ]
+    },
+    {
+        "id": "b6c7d07a0458179a",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "getEvents",
+        "func": "let events = global.get('events') || [];\n\n// 최신 이벤트가 위에 보이도록 역순 정렬\nevents = events.slice().sort((a, b) => (b.ts || 0) - (a.ts || 0));\n\nmsg.events = events;\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 560,
+        "y": 3200,
+        "wires": [
+            [
+                "5b2975efe1ee8e3a"
+            ]
+        ]
+    },
+    {
+        "id": "b1495853d26db37c",
+        "type": "ui_template",
+        "z": "49f8711fc297a8c1",
+        "group": "e6e1b7942a2b8330",
+        "name": "Robots cards",
+        "order": 0,
+        "width": 0,
+        "height": 0,
+        "format": "<div class=\"robots-wrapper\">\n  <div ng-repeat=\"r in msg.robots\" \n       class=\"robot-card\" \n       ng-class=\"(r.state || 'unknown').toLowerCase()\">\n       \n    <div class=\"robot-header\">\n      <span class=\"robot-id\">{{r.robot_id}}</span>\n      <span class=\"state-pill\" \n            ng-class=\"(r.state || 'unknown').toLowerCase()\">\n        {{(r.state || 'unknown') | uppercase}}\n      </span>\n    </div>\n\n    <div class=\"robot-main\">\n      <div class=\"battery\">\n        🔋 {{r.battery !== null && r.battery !== undefined ? (r.battery + '%') : '-'}}\n      </div>\n      <div class=\"area\">\n        📍 {{r.area || '-'}}\n      </div>\n      <div class=\"task\">\n        🧾 {{r.task_id || '-'}}\n      </div>\n      <div class=\"error\" ng-if=\"r.error_code\">\n        ⚠ ERROR: {{r.error_code}}\n      </div>\n    </div>\n\n    <div class=\"robot-footer\">\n      <span class=\"updated-label\">UPDATED</span>\n      <span class=\"updated-at\">\n        {{ r.updated_at | date:'HH:mm:ss' }}\n      </span>\n    </div>\n  </div>\n\n  <div ng-if=\"!msg.robots || msg.robots.length === 0\" class=\"robot-empty\">\n    No robot data yet.\n  </div>\n</div>\n\n<style>\n  .robots-wrapper {\n    display:flex;\n    flex-wrap:wrap;\n    gap:16px;\n    padding-top:4px;\n  }\n  .robot-card {\n    width: 220px;\n    background: radial-gradient(circle at top left, #0f172a, #020617);\n    border-radius:16px;\n    padding:12px 14px;\n    box-shadow:0 0 18px rgba(15,23,42,0.9);\n    border:1px solid rgba(148,163,184,0.35);\n    color:#E5E7EB;\n    display:flex;\n    flex-direction:column;\n    justify-content:space-between;\n  }\n  .robot-header {\n    display:flex;\n    justify-content:space-between;\n    align-items:center;\n    margin-bottom:8px;\n  }\n  .robot-id {\n    font-weight:700;\n    font-size:16px;\n    color:#F9FAFB;\n  }\n  .state-pill {\n    padding:2px 8px;\n    border-radius:999px;\n    font-size:10px;\n    font-weight:600;\n    letter-spacing:0.5px;\n    border:1px solid rgba(148,163,184,0.5);\n  }\n  .state-pill.idle {\n    background:rgba(148,163,184,0.15);\n    border-color:#9CA3AF;\n    color:#E5E7EB;\n  }\n  .state-pill.running {\n    background:rgba(34,197,94,0.15);\n    border-color:#22C55E;\n    color:#BBF7D0;\n  }\n  .state-pill.charging {\n    background:rgba(234,179,8,0.12);\n    border-color:#EAB308;\n    color:#FEF9C3;\n  }\n  .state-pill.error, .state-pill.failed, .state-pill.fault {\n    background:rgba(239,68,68,0.16);\n    border-color:#EF4444;\n    color:#FECACA;\n  }\n  .state-pill.unknown {\n    background:rgba(59,130,246,0.12);\n    border-color:#3B82F6;\n    color:#BFDBFE;\n  }\n\n  .robot-main {\n    font-size:13px;\n    line-height:1.4;\n    margin-top:4px;\n    margin-bottom:8px;\n  }\n  .robot-main > div {\n    margin:2px 0;\n  }\n  .robot-main .error {\n    color:#FCA5A5;\n    font-size:12px;\n  }\n\n  .robot-footer {\n    display:flex;\n    justify-content:space-between;\n    font-size:10px;\n    color:#9CA3AF;\n    border-top:1px dashed rgba(55,65,81,0.8);\n    padding-top:4px;\n    margin-top:4px;\n  }\n  .robot-empty {\n    font-size:12px;\n    color:#9CA3AF;\n    padding:10px;\n  }\n</style>\n",
+        "storeOutMessages": true,
+        "fwdInMessages": true,
+        "resendOnRefresh": true,
+        "templateScope": "local",
+        "className": "",
+        "x": 870,
+        "y": 2960,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "4cc056840f379311",
+        "type": "inject",
+        "z": "49f8711fc297a8c1",
+        "name": "Summary",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "1",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 210,
+        "y": 2860,
+        "wires": [
+            [
+                "cc62e9eae576026f"
+            ]
+        ]
+    },
+    {
+        "id": "cc62e9eae576026f",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "Summary",
+        "func": "// robots 요약\nconst robots = global.get('robots') || {};\nconst taskQueue = global.get('taskQueue') || [];\n\nlet total = 0, idle = 0, running = 0, charging = 0, error = 0, others = 0;\n\nfor (const id in robots) {\n    total++;\n    const s = (robots[id].state || '').toLowerCase();\n    if (s === 'idle') idle++;\n    else if (s === 'running') running++;\n    else if (s === 'charging') charging++;\n    else if (s === 'error' || s === 'failed' || s === 'fault') error++;\n    else others++;\n}\n\nmsg.summary = { total, idle, running, charging, error, others };\n\n// tasks 요약\nlet tTotal = taskQueue.length;\nlet tPending = 0, tRunning = 0, tDone = 0, tFailed = 0;\n\nfor (const t of taskQueue) {\n    const s = (t.status || '').toLowerCase();\n    if (s === 'pending') tPending++;\n    else if (s === 'running') tRunning++;\n    else if (s === 'done') tDone++;\n    else if (s === 'failed') tFailed++;\n}\n\nmsg.taskSummary = {\n    total: tTotal,\n    pending: tPending,\n    running: tRunning,\n    done: tDone,\n    failed: tFailed\n};\n\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 540,
+        "y": 2860,
+        "wires": [
+            [
+                "74d6b228f443bd37"
+            ]
+        ]
+    },
+    {
+        "id": "74d6b228f443bd37",
+        "type": "ui_template",
+        "z": "49f8711fc297a8c1",
+        "group": "7e8e44e7110066b9",
+        "name": "",
+        "order": 0,
+        "width": 0,
+        "height": 0,
+        "format": "<div class=\"dash-summary\">\n  <div class=\"summary-card total\">\n    <div class=\"label\">ROBOTS</div>\n    <div class=\"value\">{{msg.summary.total || 0}}</div>\n  </div>\n  <div class=\"summary-card idle\">\n    <div class=\"label\">IDLE</div>\n    <div class=\"value\">{{msg.summary.idle || 0}}</div>\n  </div>\n  <div class=\"summary-card running\">\n    <div class=\"label\">RUNNING</div>\n    <div class=\"value\">{{msg.summary.running || 0}}</div>\n  </div>\n  <div class=\"summary-card charging\">\n    <div class=\"label\">CHARGING</div>\n    <div class=\"value\">{{msg.summary.charging || 0}}</div>\n  </div>\n  <div class=\"summary-card error\">\n    <div class=\"label\">ERROR/OTHER</div>\n    <div class=\"value\">\n      {{(msg.summary.error || 0) + (msg.summary.others || 0)}}\n    </div>\n  </div>\n</div>\n\n<div class=\"dash-summary\" style=\"margin-top:6px;\">\n  <div class=\"summary-card task-total\">\n    <div class=\"label\">TASKS</div>\n    <div class=\"value\">{{msg.taskSummary.total || 0}}</div>\n  </div>\n  <div class=\"summary-card task-pending\">\n    <div class=\"label\">PENDING</div>\n    <div class=\"value\">{{msg.taskSummary.pending || 0}}</div>\n  </div>\n  <div class=\"summary-card task-running\">\n    <div class=\"label\">RUNNING</div>\n    <div class=\"value\">{{msg.taskSummary.running || 0}}</div>\n  </div>\n  <div class=\"summary-card task-done\">\n    <div class=\"label\">DONE</div>\n    <div class=\"value\">{{msg.taskSummary.done || 0}}</div>\n  </div>\n  <div class=\"summary-card task-failed\">\n    <div class=\"label\">FAILED</div>\n    <div class=\"value\">{{msg.taskSummary.failed || 0}}</div>\n  </div>\n</div>\n\n<style>\n  .dash-summary {\n    display:flex;\n    flex-wrap:wrap;\n    gap:16px;\n    padding:4px 0 4px 0;\n  }\n  .summary-card {\n    flex:0 0 150px;\n    background:#020617;\n    border-radius:14px;\n    padding:10px 14px;\n    box-shadow:0 0 18px rgba(0,0,0,0.45);\n    border:1px solid rgba(148,163,184,0.25);\n  }\n  .summary-card .label {\n    font-size:11px;\n    letter-spacing:1px;\n    color:#9CA3AF;\n  }\n  .summary-card .value {\n    margin-top:4px;\n    font-size:22px;\n    font-weight:700;\n    color:#F9FAFB;\n  }\n\n  .summary-card.total      { border-left:3px solid #38BDF8; }\n  .summary-card.idle       { border-left:3px solid #9CA3AF; }\n  .summary-card.running    { border-left:3px solid #22C55E; }\n  .summary-card.charging   { border-left:3px solid #EAB308; }\n  .summary-card.error      { border-left:3px solid #EF4444; }\n\n  .summary-card.task-total   { border-left:3px solid #6366F1; }\n  .summary-card.task-pending { border-left:3px solid #9CA3AF; }\n  .summary-card.task-running { border-left:3px solid #22C55E; }\n  .summary-card.task-done    { border-left:3px solid #0EA5E9; }\n  .summary-card.task-failed  { border-left:3px solid #F97316; }\n</style>\n",
+        "storeOutMessages": true,
+        "fwdInMessages": true,
+        "resendOnRefresh": true,
+        "templateScope": "local",
+        "className": "",
+        "x": 860,
+        "y": 2860,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "c915a198b0c6cae3",
+        "type": "ui_template",
+        "z": "49f8711fc297a8c1",
+        "group": "920df32220cd089d",
+        "name": "",
+        "order": 0,
+        "width": 0,
+        "height": 0,
+        "format": "<div class=\"tasks-wrapper\">\n  <table class=\"tasks-table\" ng-if=\"msg.tasks && msg.tasks.length\">\n    <thead>\n      <tr>\n        <th>Task ID</th>\n        <th>Type</th>\n        <th>Target</th>\n        <th>Status</th>\n        <th>Robot</th>\n        <th>Created</th>\n      </tr>\n    </thead>\n    <tbody>\n      <tr ng-repeat=\"t in msg.tasks\">\n        <td>{{t.task_id}}</td>\n        <td>{{t.type}}</td>\n        <td>{{t.target_area}}</td>\n        <td>\n          <span class=\"task-status\" ng-class=\"(t.status || 'unknown').toLowerCase()\">\n            {{(t.status || 'unknown') | uppercase}}\n          </span>\n        </td>\n        <td>{{t.assigned_robot || '-'}}</td>\n        <td>{{t.created_at | date:'MM-dd HH:mm:ss'}}</td>\n      </tr>\n    </tbody>\n  </table>\n\n  <div ng-if=\"!msg.tasks || !msg.tasks.length\" class=\"tasks-empty\">\n    No tasks yet.\n  </div>\n</div>\n\n<style>\n  .tasks-wrapper {\n    padding-top:4px;\n  }\n  .tasks-table {\n    width:100%;\n    border-collapse:collapse;\n    font-size:12px;\n    background:#020617;\n    border-radius:10px;\n    overflow:hidden;\n    box-shadow:0 0 18px rgba(15,23,42,0.7);\n  }\n  .tasks-table thead {\n    background:linear-gradient(to right,#0f172a,#020617);\n  }\n  .tasks-table th,\n  .tasks-table td {\n    padding:6px 8px;\n    text-align:left;\n    border-bottom:1px solid rgba(30,41,59,0.9);\n    color:#E5E7EB;\n  }\n  .tasks-table th {\n    font-weight:600;\n    font-size:11px;\n    color:#9CA3AF;\n  }\n  .tasks-table tbody tr:hover {\n    background:rgba(15,23,42,0.8);\n  }\n\n  .task-status {\n    padding:2px 6px;\n    border-radius:999px;\n    font-size:10px;\n    border:1px solid rgba(148,163,184,0.4);\n  }\n  .task-status.pending {\n    background:rgba(148,163,184,0.1);\n    border-color:#9CA3AF;\n  }\n  .task-status.running {\n    background:rgba(34,197,94,0.15);\n    border-color:#22C55E;\n    color:#BBF7D0;\n  }\n  .task-status.done {\n    background:rgba(59,130,246,0.18);\n    border-color:#3B82F6;\n    color:#DBEAFE;\n  }\n  .task-status.failed {\n    background:rgba(239,68,68,0.18);\n    border-color:#EF4444;\n    color:#FECACA;\n  }\n  .task-status.unknown {\n    background:rgba(107,114,128,0.18);\n    border-color:#6B7280;\n    color:#E5E7EB;\n  }\n\n  .tasks-empty {\n    font-size:12px;\n    color:#9CA3AF;\n    padding:8px;\n  }\n</style>\n",
+        "storeOutMessages": true,
+        "fwdInMessages": true,
+        "resendOnRefresh": true,
+        "templateScope": "local",
+        "className": "",
+        "x": 880,
+        "y": 3080,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "5b2975efe1ee8e3a",
+        "type": "ui_template",
+        "z": "49f8711fc297a8c1",
+        "group": "ab2f507577ca5dbe",
+        "name": "",
+        "order": 0,
+        "width": 0,
+        "height": 0,
+        "format": "<div class=\"events-wrapper\">\n  <table class=\"events-table\" ng-if=\"msg.events && msg.events.length\">\n    <thead>\n      <tr>\n        <th>Time</th>\n        <th>Type</th>\n        <th>Robot</th>\n        <th>Task</th>\n        <th>State</th>\n        <th>Area</th>\n        <th>Error</th>\n      </tr>\n    </thead>\n    <tbody>\n      <tr ng-repeat=\"e in msg.events | limitTo:50\">\n        <td>{{e.ts | date:'HH:mm:ss'}}</td>\n        <td>{{e.type}}</td>\n        <td>{{e.robot_id}}</td>\n        <td>{{e.task_id}}</td>\n        <td>{{e.state}}</td>\n        <td>{{e.area || '-'}}</td>\n        <td>{{e.error_code || '-'}}</td>\n      </tr>\n    </tbody>\n  </table>\n\n  <div ng-if=\"!msg.events || !msg.events.length\" class=\"events-empty\">\n    No events yet.\n  </div>\n</div>\n\n<style>\n  .events-wrapper {\n    padding-top:4px;\n  }\n  .events-table {\n    width:100%;\n    border-collapse:collapse;\n    font-size:11px;\n    background:#020617;\n    border-radius:10px;\n    overflow:hidden;\n    box-shadow:0 0 18px rgba(15,23,42,0.7);\n  }\n  .events-table thead {\n    background:linear-gradient(to right,#0f172a,#020617);\n  }\n  .events-table th,\n  .events-table td {\n    padding:4px 6px;\n    text-align:left;\n    border-bottom:1px solid rgba(30,41,59,0.9);\n    color:#E5E7EB;\n  }\n  .events-table th {\n    font-weight:600;\n    font-size:10px;\n    color:#9CA3AF;\n  }\n  .events-table tbody tr:hover {\n    background:rgba(15,23,42,0.8);\n  }\n  .events-empty {\n    font-size:12px;\n    color:#9CA3AF;\n    padding:8px;\n  }\n</style>\n",
+        "storeOutMessages": true,
+        "fwdInMessages": true,
+        "resendOnRefresh": true,
+        "templateScope": "local",
+        "className": "",
+        "x": 880,
+        "y": 3200,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "f4058cf1557c02ec",
+        "type": "inject",
+        "z": "49f8711fc297a8c1",
+        "name": "Init global state",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": true,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 420,
+        "y": 340,
+        "wires": [
+            [
+                "dd5be1ad5697a1f2"
+            ]
+        ]
+    },
+    {
+        "id": "dd5be1ad5697a1f2",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "initGlobalState",
+        "func": "// 전역 상태 기본값 세팅\n// area -> grid 좌표 (Vue의 mapConfig.js랑 동일하게 맞추면 최고)\nconst AREA_POS = {\n  BASE:  { x: 2,  y: 7 },\n  DOCK:  { x: 2,  y: 2 },\n  USER1: { x: 9,  y: 3 },\n  USER2: { x: 10, y: 6 },\n};\n\nglobal.set(\"AREA_POS\", AREA_POS);\nnode.warn(\"AREA_POS loaded\");\nreturn msg;\n\n// 이미 있으면 유지, 없으면 새로 만든다\nlet robots = global.get('robots') || {};\nlet taskQueue = global.get('taskQueue') || [];\nlet events = global.get('events') || [];\n\n// agv1 기본 엔트리가 없으면 생성\nif (!robots['agv1']) {\n    robots['agv1'] = {\n        robot_id: 'agv1',\n        state: 'idle',          // idle | running | error | charging | offline\n        task_id: null,\n        battery: 100,\n        area: 'HOME',\n        error_code: null,\n        updated_at: Date.now()\n    };\n}\n\n// 전역에 저장\nglobal.set('robots', robots);\nglobal.set('taskQueue', taskQueue);\nglobal.set('events', events);\n\nnode.status({ fill: \"green\", shape: \"dot\", text: \"global initialized\" });\nreturn null;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 660,
+        "y": 340,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "5683f1a5e869fec8",
+        "type": "mqtt in",
+        "z": "49f8711fc297a8c1",
+        "name": "",
+        "topic": "robot/agv1/task",
+        "qos": "2",
+        "datatype": "utf8",
+        "broker": "3c16a07776b27396",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 400,
+        "y": 1020,
+        "wires": [
+            [
+                "4319d8f20df90726",
+                "a50e6fc76e6e8f77"
+            ]
+        ]
+    },
+    {
+        "id": "4319d8f20df90726",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "simulateAGV",
+        "func": "// robot/agv1/task 로 들어온 Task를 받아서\n// 1) running status (pose를 200ms마다 업데이트하며 여러 번 발행)\n// 2) 5초 후 done/idle status (마지막 pose 포함)\n// output1: running 스트림(여러 메시지), output2: done(딜레이 타고 나갈 예정)\n\nlet task;\ntry {\n    task = JSON.parse(msg.payload || '{}');\n} catch (e) {\n    node.error('Invalid task JSON in simulateAGV', msg);\n    return null;\n}\n\nconst robotId = 'agv1';\n\n// 배터리/area/pose를 context에서 관리\nlet battery = context.get('battery') ?? 80;\nlet area = context.get('area') || 'BASE';\n\n// pose는 \"가상 좌표\" (grid 좌표계 float)\nlet pose = context.get('pose') || { x: 2, y: 7, theta: 0 }; // BASE 근처 기본값\n\n// 배터리 살짝 깎기\nbattery = Math.max(0, battery - 1);\ncontext.set('battery', battery);\n\n// ---- area 좌표 매핑 로드 ----\nconst AREA_POS = global.get(\"AREA_POS\") || {\n  BASE:  { x: 2,  y: 7 },\n  DOCK:  { x: 2,  y: 2 },\n  USER1: { x: 9,  y: 3 },\n  USER2: { x: 10, y: 6 },\n};\n\n// 목표 지점 결정: task.target_area 우선, 없으면 현재 area 유지\nconst targetArea = task.target_area || area;\nconst startArea = area;\nconst startPos = { x: pose.x, y: pose.y };\nconst endPos = AREA_POS[targetArea] || startPos;\n\n// heading 계산\nfunction heading(from, to) {\n  const dx = to.x - from.x;\n  const dy = to.y - from.y;\n  return Math.atan2(dy, dx);\n}\nfunction lerp(a, b, t) { return a + (b - a) * t; }\n\n// ---- running 스트림 생성 ----\nconst DURATION_MS = 5000;\nconst STEP_MS = 200;\nconst steps = Math.max(1, Math.floor(DURATION_MS / STEP_MS));\n\nconst msgsRunning = [];\n\nfor (let i = 0; i <= steps; i++) {\n  const t = i / steps;\n  const x = lerp(startPos.x, endPos.x, t);\n  const y = lerp(startPos.y, endPos.y, t);\n  const theta = heading({x, y}, endPos);\n\n  const runningStatus = {\n    robot_id: robotId,\n    state: 'running',\n    task_id: task.task_id || null,\n    battery: battery,\n    area: startArea,          // \"현재 구역\"은 큰 의미로 시작 area 유지 (원하면 중간에 바꿔도 됨)\n    target_area: targetArea,  // 목표 구역 표시(Overview 미니맵 마커용)\n    error_code: null,\n    pose: { x, y, theta },\n    updated_at: Date.now()\n  };\n\n  msgsRunning.push({\n    topic: `robot/${robotId}/status`,\n    payload: JSON.stringify(runningStatus),\n    // Delay 노드가 \"msg.delay\"를 읽도록 세팅 (Delay 노드 설정에 따라 다를 수 있음)\n    delay: i * STEP_MS\n  });\n}\n\n// 마지막 pose를 context에 저장 (작업 끝난 위치)\npose = { x: endPos.x, y: endPos.y, theta: heading(endPos, endPos) };\ncontext.set('pose', pose);\n\n// 작업이 끝나면 area를 targetArea로 갱신\narea = targetArea;\ncontext.set('area', area);\n\n// ---- done/idle 메시지 준비 ----\nconst doneStatus = {\n    robot_id: robotId,\n    state: 'idle',\n    task_id: task.task_id || null,\n    battery: battery,\n    area: area,\n    target_area: null,\n    error_code: null,\n    pose: { x: endPos.x, y: endPos.y, theta: heading(startPos, endPos) },\n    updated_at: Date.now()\n};\n\nlet msgDone = {\n    topic: `robot/${robotId}/status`,\n    payload: JSON.stringify(doneStatus)\n};\n\n// output1: running 스트림(여러 메시지), output2: done(딜레이 타고 나갈 예정)\nreturn [msgsRunning, msgDone];\n",
+        "outputs": 2,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 670,
+        "y": 1020,
+        "wires": [
+            [
+                "241f54b35e15895f"
+            ],
+            [
+                "c892835546595db4"
+            ]
+        ]
+    },
+    {
+        "id": "e5f2fa78b4c8f5b4",
+        "type": "mqtt out",
+        "z": "49f8711fc297a8c1",
+        "name": "",
+        "topic": "",
+        "qos": "",
+        "retain": "",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "3c16a07776b27396",
+        "x": 970,
+        "y": 1020,
+        "wires": []
+    },
+    {
+        "id": "5462d48ba72465a3",
+        "type": "mqtt out",
+        "z": "49f8711fc297a8c1",
+        "name": "",
+        "topic": "",
+        "qos": "",
+        "retain": "",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "3c16a07776b27396",
+        "x": 970,
+        "y": 1100,
+        "wires": []
+    },
+    {
+        "id": "c892835546595db4",
+        "type": "delay",
+        "z": "49f8711fc297a8c1",
+        "name": "",
+        "pauseType": "delay",
+        "timeout": "5",
+        "timeoutUnits": "seconds",
+        "rate": "1",
+        "nbRateUnits": "1",
+        "rateUnits": "second",
+        "randomFirst": "1",
+        "randomLast": "5",
+        "randomUnits": "seconds",
+        "drop": false,
+        "allowrate": false,
+        "outputs": 1,
+        "x": 820,
+        "y": 1100,
+        "wires": [
+            [
+                "5462d48ba72465a3",
+                "d79424313dccb2f0"
+            ]
+        ]
+    },
+    {
+        "id": "a50e6fc76e6e8f77",
+        "type": "debug",
+        "z": "49f8711fc297a8c1",
+        "name": "debug 3",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 580,
+        "y": 1140,
+        "wires": []
+    },
+    {
+        "id": "d79424313dccb2f0",
+        "type": "debug",
+        "z": "49f8711fc297a8c1",
+        "name": "debug 4",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1100,
+        "y": 1220,
+        "wires": []
+    },
+    {
+        "id": "0e18ed358d9967fb",
+        "type": "debug",
+        "z": "49f8711fc297a8c1",
+        "name": "debug 5",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1260,
+        "y": 1100,
+        "wires": []
+    },
+    {
+        "id": "9a5002eb64eee3d0",
+        "type": "http in",
+        "z": "49f8711fc297a8c1",
+        "name": "GET /api/robots",
+        "url": "/api/robots",
+        "method": "get",
+        "upload": false,
+        "skipBodyParsing": false,
+        "swaggerDoc": "",
+        "x": 400,
+        "y": 1440,
+        "wires": [
+            [
+                "1099aa542425c508"
+            ]
+        ]
+    },
+    {
+        "id": "1099aa542425c508",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "buildRobotsResponse",
+        "func": "// // global.robots를 읽어서 API 응답 형태로 만들어주는 함수\n\n// const robotsObj = global.get('robots') || {};\n// const robotsArr = [];\n\n// // 객체 → 배열로 변환\n// for (const id in robotsObj) {\n//     const r = robotsObj[id] || {};\n//     robotsArr.push(r);\n// }\n\n// // JSON 응답 형태 세팅\n// msg.payload = {\n//     robots: robotsArr\n// };\n\n// // 헤더에 JSON이라고 명시\n// msg.headers = {\n//     'Content-Type': 'application/json'\n// };\n\n// return msg;\n\nconst db = global.get(\"db\");\nif (!db) {\n  msg.statusCode = 503;\n  msg.headers = { \"Content-Type\": \"application/json\" };\n  msg.payload = { error: \"firestore not ready\" };\n  return msg;\n}\n\nconst limit = Math.min(parseInt((msg.req?.query?.limit ?? \"100\"), 10) || 100, 500);\n\nreturn new Promise(async (resolve) => {\n  try {\n    // updated_at 기준 최신순 (필드 없으면 인덱스/정렬 이슈 가능)\n    let q = db.collection(\"robots\");\n\n    // orderBy는 필드가 안정적으로 들어가야 함. 안 들어간 문서가 있으면 정렬에서 빠질 수 있음.\n    // 너 updateStatus에서 updated_at을 항상 넣고 있어서 OK. :contentReference[oaicite:2]{index=2}\n    q = q.orderBy(\"updated_at\", \"desc\").limit(limit);\n\n    const snap = await q.get();\n    const robots = snap.docs.map(d => d.data());\n\n    msg.statusCode = 200;\n    msg.headers = { \"Content-Type\": \"application/json\" };\n    msg.payload = { robots };\n    resolve(msg);\n  } catch (err) {\n    node.error(err);\n    msg.statusCode = 500;\n    msg.headers = { \"Content-Type\": \"application/json\" };\n    msg.payload = { error: \"failed to fetch robots\", detail: String(err?.message || err) };\n    resolve(msg);\n  }\n});",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 660,
+        "y": 1440,
+        "wires": [
+            [
+                "04c572829db161a8"
+            ]
+        ]
+    },
+    {
+        "id": "04c572829db161a8",
+        "type": "http response",
+        "z": "49f8711fc297a8c1",
+        "name": "res /api/robots",
+        "statusCode": "",
+        "headers": {},
+        "x": 900,
+        "y": 1440,
+        "wires": []
+    },
+    {
+        "id": "cf9e4d5c0ec26f3f",
+        "type": "http in",
+        "z": "49f8711fc297a8c1",
+        "name": "GET /api/tasks",
+        "url": "/api/tasks",
+        "method": "get",
+        "upload": false,
+        "skipBodyParsing": false,
+        "swaggerDoc": "",
+        "x": 400,
+        "y": 1520,
+        "wires": [
+            [
+                "4db69741e35d7aaa"
+            ]
+        ]
+    },
+    {
+        "id": "4db69741e35d7aaa",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "buildTasksResponse",
+        "func": "// let tasks = global.get('taskQueue') || [];\n\n// // 최신순 정렬 (Vue에서 보기 좋게)\n// tasks = tasks.slice().sort((a, b) => (b.created_at || 0) - (a.created_at || 0));\n\n// msg.payload = { tasks };\n// msg.headers = { \"Content-Type\": \"application/json\" };\n// return msg;\n\nconst db = global.get(\"db\");\nif (!db) {\n  msg.statusCode = 503;\n  msg.headers = { \"Content-Type\": \"application/json\" };\n  msg.payload = { error: \"firestore not ready\" };\n  return msg;\n}\n\nconst q = msg.req?.query || {};\nconst status = (q.status || \"\").toString().trim(); // pending|running|done|failed 등\nconst limit = Math.min(parseInt((q.limit ?? \"50\"), 10) || 50, 500);\n\nreturn new Promise(async (resolve) => {\n  try {\n    let ref = db.collection(\"tasks\");\n\n    // status 필터 (옵션)\n    if (status) {\n      ref = ref.where(\"status\", \"==\", status);\n      // where + orderBy 조합 시 인덱스 필요할 수 있음 (에러 메시지에 생성 링크 나옴)\n    }\n\n    // created_at 최신순\n    ref = ref.orderBy(\"created_at\", \"desc\").limit(limit);\n\n    const snap = await ref.get();\n    const tasks = snap.docs.map(d => d.data());\n\n    msg.statusCode = 200;\n    msg.headers = { \"Content-Type\": \"application/json\" };\n    msg.payload = { tasks };\n    resolve(msg);\n  } catch (err) {\n    node.error(err);\n    msg.statusCode = 500;\n    msg.headers = { \"Content-Type\": \"application/json\" };\n    msg.payload = { error: \"failed to fetch tasks\", detail: String(err?.message || err) };\n    resolve(msg);\n  }\n});\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 660,
+        "y": 1520,
+        "wires": [
+            [
+                "bd552ae11c61fc7b"
+            ]
+        ]
+    },
+    {
+        "id": "bd552ae11c61fc7b",
+        "type": "http response",
+        "z": "49f8711fc297a8c1",
+        "name": "res /api/tasks",
+        "statusCode": "",
+        "headers": {},
+        "x": 910,
+        "y": 1520,
+        "wires": []
+    },
+    {
+        "id": "3dc12e5ce8d5567e",
+        "type": "http in",
+        "z": "49f8711fc297a8c1",
+        "name": "GET /api/events",
+        "url": "/api/events",
+        "method": "get",
+        "upload": false,
+        "skipBodyParsing": false,
+        "swaggerDoc": "",
+        "x": 400,
+        "y": 1600,
+        "wires": [
+            [
+                "47eeabd70b7c449b"
+            ]
+        ]
+    },
+    {
+        "id": "47eeabd70b7c449b",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "buildEventsResponse",
+        "func": "// let events = global.get('events') || [];\n\n// // 최신순 정렬\n// events = events.slice().sort((a, b) => (b.ts || 0) - (a.ts || 0));\n\n// msg.payload = { events };\n// msg.headers = { \"Content-Type\": \"application/json\" };\n// return msg;\n\nconst db = global.get(\"db\");\nif (!db) {\n  msg.statusCode = 503;\n  msg.headers = { \"Content-Type\": \"application/json\" };\n  msg.payload = { error: \"firestore not ready\" };\n  return msg;\n}\n\nconst limit = Math.min(parseInt((msg.req?.query?.limit ?? \"50\"), 10) || 50, 500);\n\nreturn new Promise(async (resolve) => {\n  try {\n    const snap = await db\n      .collection(\"events\")\n      .orderBy(\"ts\", \"desc\")\n      .limit(limit)\n      .get();\n\n    const events = snap.docs.map(d => d.data());\n\n    msg.statusCode = 200;\n    msg.headers = { \"Content-Type\": \"application/json\" };\n    msg.payload = { events };\n    resolve(msg);\n  } catch (err) {\n    node.error(err);\n    msg.statusCode = 500;\n    msg.headers = { \"Content-Type\": \"application/json\" };\n    msg.payload = { error: \"failed to fetch events\", detail: String(err?.message || err) };\n    resolve(msg);\n  }\n});\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 660,
+        "y": 1600,
+        "wires": [
+            [
+                "14173b48771091af"
+            ]
+        ]
+    },
+    {
+        "id": "14173b48771091af",
+        "type": "http response",
+        "z": "49f8711fc297a8c1",
+        "name": "res /api/events",
+        "statusCode": "",
+        "headers": {},
+        "x": 920,
+        "y": 1600,
+        "wires": []
+    },
+    {
+        "id": "aae26e35525d4347",
+        "type": "http in",
+        "z": "49f8711fc297a8c1",
+        "name": "GET /api/summary",
+        "url": "/api/summary",
+        "method": "get",
+        "upload": false,
+        "skipBodyParsing": false,
+        "swaggerDoc": "",
+        "x": 410,
+        "y": 1680,
+        "wires": [
+            [
+                "3252b669c8d4ee2a"
+            ]
+        ]
+    },
+    {
+        "id": "3252b669c8d4ee2a",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "buildSummaryResponse",
+        "func": "// const robots = global.get('robots') || {};\n// const tasks = global.get('taskQueue') || [];\n\n// let total = 0, idle = 0, running = 0, charging = 0, error = 0, others = 0;\n// for (const id in robots) {\n//     total++;\n//     const s = (robots[id].state || '').toLowerCase();\n//     if (s === 'idle') idle++;\n//     else if (s === 'running') running++;\n//     else if (s === 'charging') charging++;\n//     else if (s === 'error' || s === 'failed' || s === 'fault') error++;\n//     else others++;\n// }\n\n// let tTotal = tasks.length;\n// let tPending = 0, tRunning = 0, tDone = 0, tFailed = 0;\n// for (const t of tasks) {\n//     const s = (t.status || '').toLowerCase();\n//     if (s === 'pending') tPending++;\n//     else if (s === 'running') tRunning++;\n//     else if (s === 'done') tDone++;\n//     else if (s === 'failed') tFailed++;\n// }\n\n// msg.payload = {\n//     robots: { total, idle, running, charging, error, others },\n//     tasks:  { total: tTotal, pending: tPending, running: tRunning, done: tDone, failed: tFailed }\n// };\n// msg.headers = { \"Content-Type\": \"application/json\" };\n// return msg;\n\nconst db = global.get(\"db\");\nif (!db) {\n  msg.statusCode = 503;\n  msg.headers = { \"Content-Type\": \"application/json\" };\n  msg.payload = { error: \"firestore not ready\" };\n  return msg;\n}\n\nconst q = msg.req?.query || {};\nconst taskLimit = Math.min(parseInt((q.taskLimit ?? \"200\"), 10) || 200, 1000);\n\nfunction countBy(list, keyFn) {\n  const m = {};\n  for (const x of list) {\n    const k = (keyFn(x) || \"unknown\").toLowerCase();\n    m[k] = (m[k] || 0) + 1;\n  }\n  return m;\n}\n\nreturn new Promise(async (resolve) => {\n  try {\n    // 1) robots 전부 읽어서 상태 카운트\n    const robotsSnap = await db.collection(\"robots\").get();\n    const robots = robotsSnap.docs.map(d => d.data());\n    const robotCounts = countBy(robots, r => r.state);\n\n    const robotSummary = {\n      total: robots.length,\n      idle: robotCounts.idle || 0,\n      running: robotCounts.running || 0,\n      charging: robotCounts.charging || 0,\n      error: (robotCounts.error || 0) + (robotCounts.failed || 0) + (robotCounts.fault || 0),\n      others:\n        (robotCounts.offline || 0) +\n        (robotCounts.unknown || 0)\n    };\n\n    // 2) tasks는 최근 N개만 읽어서 상태 카운트 (Phase 0 가벼운 집계)\n    const tasksSnap = await db\n      .collection(\"tasks\")\n      .orderBy(\"created_at\", \"desc\")\n      .limit(taskLimit)\n      .get();\n\n    const tasks = tasksSnap.docs.map(d => d.data());\n    const taskCounts = countBy(tasks, t => t.status);\n\n    const taskSummary = {\n      total: tasks.length,\n      pending: taskCounts.pending || 0,\n      running: taskCounts.running || 0,\n      done: taskCounts.done || 0,\n      failed: taskCounts.failed || 0\n    };\n\n    msg.statusCode = 200;\n    msg.headers = { \"Content-Type\": \"application/json\" };\n    msg.payload = { robots: robotSummary, tasks: taskSummary, meta: { taskLimit } };\n    resolve(msg);\n  } catch (err) {\n    node.error(err);\n    msg.statusCode = 500;\n    msg.headers = { \"Content-Type\": \"application/json\" };\n    msg.payload = { error: \"failed to fetch summary\", detail: String(err?.message || err) };\n    resolve(msg);\n  }\n});\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 690,
+        "y": 1680,
+        "wires": [
+            [
+                "bb5bd9f96e8e8313"
+            ]
+        ]
+    },
+    {
+        "id": "bb5bd9f96e8e8313",
+        "type": "http response",
+        "z": "49f8711fc297a8c1",
+        "name": "res /api/summary",
+        "statusCode": "",
+        "headers": {},
+        "x": 950,
+        "y": 1680,
+        "wires": []
+    },
+    {
+        "id": "a90b7ad07ef61884",
+        "type": "inject",
+        "z": "49f8711fc297a8c1",
+        "name": "FIrestore Client Init",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": true,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 430,
+        "y": 240,
+        "wires": [
+            [
+                "f1509788aad45a75"
+            ]
+        ]
+    },
+    {
+        "id": "f1509788aad45a75",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "Init Firestore",
+        "func": "// admin, fs 는 Function 노드 Setup(Modules)에서 주입받는다고 가정\n\nconst keyPath = \"C:/Users/wp3wk/AppData/Roaming/SPB_Data/.node-red/agv-pjt2-firebase-adminsdk-fbsvc-18055a3bd9.json\";\n\n// 0) 서비스 계정 파일 존재 확인\nif (!fs.existsSync(keyPath)) {\n  node.error(\"❌ Service account json not found: \" + keyPath);\n  return null;\n}\n\nconst serviceAccount = JSON.parse(fs.readFileSync(keyPath, \"utf8\"));\n\n// 1) 기존 firebase-admin 앱이 있으면 제거 (프로젝트 변경 시 필수)\nif (admin.apps && admin.apps.length > 0) {\n  return admin.app().delete().then(() => {\n    node.warn(\"♻️ Old firebase app deleted. Re-initializing...\");\n    return init();\n  }).catch(err => {\n    node.error(\"❌ Failed to delete old firebase app: \" + err.message);\n    return null;\n  });\n}\n\n// 2) 실제 초기화 함수\nfunction init() {\n  admin.initializeApp({\n    credential: admin.credential.cert(serviceAccount),\n  });\n\n  const db = admin.firestore();\n\n  global.set(\"admin\", admin);\n  global.set(\"db\", db);\n  global.set(\"firestoreReady\", true);\n\n  // 3) healthcheck write (성공 여부 명확히 확인)\n  return db.collection(\"_healthcheck\").doc(\"init\").set({\n    ts: Date.now(),\n    project_id: serviceAccount.project_id,\n  }).then(() => {\n    node.warn(\"✅ Firestore initialized!\");\n    node.warn(\"👉 project_id = \" + serviceAccount.project_id);\n    return null;\n  }).catch(err => {\n    node.error(\"❌ Firestore healthcheck write failed: \" + err.message);\n    return null;\n  });\n}\n\nreturn init();\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [
+            {
+                "var": "admin",
+                "module": "firebase-admin"
+            },
+            {
+                "var": "fs",
+                "module": "fs"
+            }
+        ],
+        "x": 670,
+        "y": 240,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "2ccacb1608c5ba74",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "FS : write task (create)",
+        "func": "const db = global.get(\"db\");\nif (!db) {\n    node.warn(\"Firestore not ready - skip write\");\n    return msg;\n}\n\nconst task = msg.task;\nif (!task || !task.task_id) return msg;\n\ndb.collection(\"tasks\").doc(task.task_id).set(task, { merge: true })\n    .then(() => node.warn(`FS task created: ${task.task_id}`))\n    .catch(err => node.error(err));\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 780,
+        "y": 720,
+        "wires": [
+            [
+                "8fa070ba704430fc"
+            ]
+        ]
+    },
+    {
+        "id": "58d8d616da6872e1",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "FS: update task (assigned)",
+        "func": "const db = global.get(\"db\");\nif (!db) return msg;\n\nconst task = msg.task;\nif (!task || !task.task_id) return msg;\n\ndb.collection(\"tasks\").doc(task.task_id).set(task, { merge: true })\n    .then(() => node.warn(`FS task assigned: ${task.task_id}`))\n    .catch(err => node.error(err));\n\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1120,
+        "y": 720,
+        "wires": [
+            [
+                "c02ac5399c925f84"
+            ]
+        ]
+    },
+    {
+        "id": "241f54b35e15895f",
+        "type": "delay",
+        "z": "49f8711fc297a8c1",
+        "name": "",
+        "pauseType": "delay",
+        "timeout": "200",
+        "timeoutUnits": "milliseconds",
+        "rate": "2",
+        "nbRateUnits": "",
+        "rateUnits": "second",
+        "randomFirst": "1",
+        "randomLast": "5",
+        "randomUnits": "seconds",
+        "drop": false,
+        "allowrate": true,
+        "outputs": 1,
+        "x": 870,
+        "y": 960,
+        "wires": [
+            [
+                "e5f2fa78b4c8f5b4",
+                "0e18ed358d9967fb"
+            ]
+        ]
+    },
+    {
+        "id": "54431a46252d1602",
+        "type": "http request",
+        "z": "49f8711fc297a8c1",
+        "name": "",
+        "method": "POST",
+        "ret": "obj",
+        "paytoqs": "ignore",
+        "url": "https://gms.ssafy.io/gmsapi/api.openai.com/v1/chat/completions",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": false,
+        "headers": [],
+        "x": 1010,
+        "y": 480,
+        "wires": [
+            [
+                "7dea3543f230c5e1",
+                "fd22aea86440924f"
+            ]
+        ]
+    },
+    {
+        "id": "c301115701d2a789",
+        "type": "mqtt out",
+        "z": "49f8711fc297a8c1",
+        "name": "",
+        "topic": "",
+        "qos": "",
+        "retain": "",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "3c16a07776b27396",
+        "x": 1510,
+        "y": 500,
+        "wires": []
+    },
+    {
+        "id": "1f3be0f0cf23a955",
+        "type": "telegram sender",
+        "z": "49f8711fc297a8c1",
+        "name": "",
+        "bot": "d10c4415b361b866",
+        "haserroroutput": false,
+        "outputs": 1,
+        "x": 1530,
+        "y": 420,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "7dea3543f230c5e1",
+        "type": "function",
+        "z": "49f8711fc297a8c1",
+        "name": "LLMValidate",
+        "func": "const chatId = msg._tg?.chatId;\nconst raw = msg._tg?.raw || \"\";\n\nfunction makeReply(content) {\n  return { payload: { chatId, type: \"message\", content } };\n}\n\n// content 꺼내기\nlet content = msg.payload?.choices?.[0]?.message?.content || \"\";\n\n// JSON만 추출\nfunction extractJson(text) {\n  if (!text) return null;\n  text = text.replace(/```json\\s*/g, \"\").replace(/```\\s*/g, \"\").trim();\n  const s = text.indexOf(\"{\");\n  const e = text.lastIndexOf(\"}\");\n  if (s === -1 || e === -1 || e <= s) return null;\n  return text.slice(s, e + 1);\n}\n\nconst jsonStr = extractJson(content);\nif (!jsonStr) return [makeReply(\"죄송해요 😥 요청을 이해하지 못했어요. 버튼으로 다시 해주세요.\"), null];\n\nlet parsed;\ntry { parsed = JSON.parse(jsonStr); }\ncatch { return [makeReply(\"죄송해요 😥 요청 해석 결과가 깨졌어요. 버튼으로 다시 해주세요.\"), null]; }\n\n// allow-list\nconst ALLOW_TYPE = new Set([\"deliver_water\", \"collect_cup\", \"collect_laundry\"]);\nconst ALLOW_AREA = new Set([\"USER1\", \"USER2\", \"DOCK\", \"BASE\"]);\n\nconst type = parsed.type;\nlet area = parsed.target_area;\n\n// type은 반드시 있어야 함\nif (!ALLOW_TYPE.has(type)) {\n  return [makeReply(\"무슨 요청인지 판단하지 못했어요 😥\\n버튼으로 다시 선택해 주세요.\"), null];\n}\n\n// ✅ default area fallback (임시: flow에 저장, 없으면 USER1)\nlet defaultArea = flow.get(\"default_area_\" + chatId);\nif (!defaultArea) defaultArea = \"USER1\";\n\n// ✅ area가 없거나 이상하면 default로 채움\nif (!ALLOW_AREA.has(area)) {\n  area = defaultArea;\n}\n\n// topic 결정\nconst topic =\n  type === \"deliver_water\" ? \"cmd/water/request\" :\n  type === \"collect_cup\" ? \"cmd/cup/request\" :\n  \"cmd/laundry/request\";\n\n// mqtt\nconst mqttMsg = {\n  topic,\n  payload: JSON.stringify({\n    type,\n    target_area: area,\n    user_id: `tg_${chatId}`,\n    meta: { source: \"telegram\", input: \"text\", raw, default_area_used: !parsed.target_area }\n  })\n};\n\nconst pretty =\n  type === \"deliver_water\" ? \"물 배달\" :\n  type === \"collect_cup\" ? \"컵 수거\" : \"세탁물 수거\";\n\nconst usedMsg = (!parsed.target_area) ? ` (기본 위치: ${area})` : \"\";\nreturn [makeReply(`✅ ${pretty} 요청을 접수했어요!${usedMsg}`), mqttMsg];\n",
+        "outputs": 2,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1250,
+        "y": 480,
+        "wires": [
+            [
+                "1f3be0f0cf23a955"
+            ],
+            [
+                "c301115701d2a789"
+            ]
+        ]
+    },
+    {
+        "id": "fd22aea86440924f",
+        "type": "debug",
+        "z": "49f8711fc297a8c1",
+        "name": "debug 6",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1160,
+        "y": 540,
+        "wires": []
+    },
+    {
+        "id": "d10c4415b361b866",
+        "type": "telegram bot",
+        "botname": "yujinnnojin",
+        "usernames": "",
+        "chatids": "",
+        "baseapiurl": "",
+        "testenvironment": false,
+        "updatemode": "polling",
+        "pollinterval": 300,
+        "usesocks": false,
+        "sockshost": "",
+        "socksprotocol": "socks5",
+        "socksport": 6667,
+        "socksusername": "anonymous",
+        "sockspassword": "",
+        "bothost": "",
+        "botpath": "",
+        "localbothost": "0.0.0.0",
+        "localbotport": 8443,
+        "publicbotport": 8443,
+        "privatekey": "",
+        "certificate": "",
+        "useselfsignedcertificate": false,
+        "sslterminated": false,
+        "verboselogging": false
+    },
+    {
+        "id": "3c16a07776b27396",
+        "type": "mqtt-broker",
+        "name": "Server",
+        "broker": "localhost",
+        "port": 1883,
+        "clientid": "",
+        "autoConnect": true,
+        "usetls": false,
+        "protocolVersion": 4,
+        "keepalive": 60,
+        "cleansession": true,
+        "autoUnsubscribe": true,
+        "birthTopic": "",
+        "birthQos": "0",
+        "birthRetain": "false",
+        "birthPayload": "",
+        "birthMsg": {},
+        "closeTopic": "",
+        "closeQos": "0",
+        "closeRetain": "false",
+        "closePayload": "",
+        "closeMsg": {},
+        "willTopic": "",
+        "willQos": "0",
+        "willRetain": "false",
+        "willPayload": "",
+        "willMsg": {},
+        "userProps": "",
+        "sessionExpiry": ""
+    },
+    {
+        "id": "e6e1b7942a2b8330",
+        "type": "ui_group",
+        "name": "Robots",
+        "tab": "8949e4e33e605647",
+        "order": 2,
+        "disp": true,
+        "width": 6,
+        "collapse": false,
+        "className": ""
+    },
+    {
+        "id": "7e8e44e7110066b9",
+        "type": "ui_group",
+        "name": "Summary",
+        "tab": "8949e4e33e605647",
+        "order": 1,
+        "disp": true,
+        "width": 6,
+        "collapse": false,
+        "className": ""
+    },
+    {
+        "id": "920df32220cd089d",
+        "type": "ui_group",
+        "name": "Tasks",
+        "tab": "8949e4e33e605647",
+        "order": 3,
+        "disp": true,
+        "width": 6,
+        "collapse": false,
+        "className": ""
+    },
+    {
+        "id": "ab2f507577ca5dbe",
+        "type": "ui_group",
+        "name": "Events",
+        "tab": "8949e4e33e605647",
+        "order": 4,
+        "disp": true,
+        "width": 6,
+        "collapse": false,
+        "className": ""
+    },
+    {
+        "id": "8949e4e33e605647",
+        "type": "ui_tab",
+        "name": "AGV Control Center",
+        "icon": "dashboard",
+        "order": 1,
+        "disabled": false,
+        "hidden": false
+    },
+    {
+        "id": "2ed468cba4100726",
+        "type": "global-config",
+        "env": [],
+        "modules": {
+            "node-red-contrib-telegrambot": "17.0.3",
+            "node-red-dashboard": "3.6.6"
+        }
+    }
+]
