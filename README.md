@@ -18,6 +18,17 @@
 | **Server / Orchestration** | ![Node-RED](https://img.shields.io/badge/Node--RED-8F0000?style=flat&logo=nodered&logoColor=white) ![MQTT](https://img.shields.io/badge/MQTT-3C5280?style=flat&logo=eclipse-mosquitto&logoColor=white) ![Firebase](https://img.shields.io/badge/Firebase-FFCA28?style=flat&logo=firebase&logoColor=black) |
 | **Dashboard (Web)** | ![Vue.js](https://img.shields.io/badge/Vue.js-4FC08D?style=flat&logo=vue.js&logoColor=white) ![Vite](https://img.shields.io/badge/Vite-646CFF?style=flat&logo=vite&logoColor=white) ![Pinia](https://img.shields.io/badge/Pinia-F1B739?style=flat&logo=pinia&logoColor=black) ![Telegram](https://img.shields.io/badge/Telegram-26A5E4?style=flat&logo=telegram&logoColor=white) ![OpenAI](https://img.shields.io/badge/OpenAI-412991?style=flat&logo=openai&logoColor=white) |
 
+## 🔌 하드웨어 스펙 및 상세 사양 (Hardware Specifications)
+
+| 구분 | 항목 | 상세 사양 |
+| :--- | :--- | :--- |
+| **Main Robot** | **AGV 모델** | **JetBot v0.4.0** 기반 커스텀 플랫폼 |
+| **Controller** | **Main Biard** | **Raspberry Pi 5** (BCM2712 SoC) |
+| **Edge AI** | **Accelerator** | **NVIDIA Jetson Nano** & Vision |
+| **Vision** | **Camera** | 객체 인식 및 자율 주행용 Vision AI Camera |
+| **Mechanics** | **Actuator** | 고성능 구동 모터 및 **환경 정리용 로봇팔** 탑재 |
+| **Connectivity** | **Wireless** |  |
+
 ## 🌟 핵심 기능 (Key Features)
 
 ### 1. 자율 주행 & 객체 인식 (Robot)
